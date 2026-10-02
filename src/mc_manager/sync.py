@@ -198,57 +198,83 @@ def plan_instance(
 def apply_plan(plan: Plan, repository: Path) -> list[Path]:
     assert_plain_directory(repository)
     relative = plan.destination.relative_to(repository)
-    written: list[Path] = []
     old = _manifest(plan.destination / MANIFEST)
-    for change in plan.changes:
+
+    def check_target(change: Change) -> Path:
         target = assert_destination(repository, relative / safe_relative(change.path))
         if change.kind == "delete":
             if not target.exists() or sha256_file(target) != old.get("files", {}).get(change.path):
                 raise SafetyError(f"Destination changed since scan: {target}")
-            target.unlink()
+        elif change.kind == "add":
+            if target.exists():
+                raise SafetyError(f"Unmanaged file appeared since scan: {target}")
+        elif change.kind == "modify":
+            if not target.exists() or sha256_file(target) not in {
+                old.get("files", {}).get(change.path),
+                change.sha256,
+            }:
+                raise SafetyError(f"Destination changed since scan: {target}")
         else:
-            assert change.source is not None and change.sha256 is not None
-            if (
-                change.source.is_symlink()
-                or sha256_file(change.source) != change.sha256
-                or not safe_content(change.source, Path(change.path).parts[0])
+            raise SafetyError(f"Unknown change type: {change.kind}")
+        return target
+
+    # Validate every path before touching managed files. Changed source files are
+    # staged inside the repository filesystem so a late source change cannot leave
+    # an earlier new file behind without an updated manifest.
+    for change in plan.changes:
+        check_target(change)
+        if change.kind != "delete":
+            if change.source is None or change.sha256 is None or change.source.is_symlink():
+                raise SafetyError(f"Source changed since scan: {change.source}")
+            if sha256_file(change.source) != change.sha256 or not safe_content(
+                change.source, Path(change.path).parts[0]
             ):
                 raise SafetyError(f"Source changed since scan: {change.source}")
-            if target.exists():
-                existing_hash = sha256_file(target)
-                if existing_hash not in {old.get("files", {}).get(change.path), change.sha256}:
-                    raise SafetyError(f"Destination changed since scan: {target}")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            fd, temp_name = tempfile.mkstemp(prefix=".mc_manager-", dir=target.parent)
-            try:
-                with os.fdopen(fd, "wb") as out:
-                    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-                    with os.fdopen(os.open(change.source, flags), "rb") as source:
-                        shutil.copyfileobj(source, out, 1024 * 1024)
-                if sha256_file(Path(temp_name)) != change.sha256:
-                    raise SafetyError(f"Source changed during copy: {change.source}")
-                os.replace(temp_name, target)
-            finally:
-                if os.path.exists(temp_name):
-                    os.unlink(temp_name)
-        written.append(target)
-    if plan.changed:
-        assert_destination(repository, relative / MANIFEST)
-        plan.destination.mkdir(parents=True, exist_ok=True)
-        manifest = {
-            "schema": 1,
-            "instance": _metadata(plan.instance),
-            "files": plan.files,
-            "last_sync": datetime.now(UTC).isoformat(),
-        }
-        fd, temp_name = tempfile.mkstemp(prefix=".mc_manager-", dir=plan.destination)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+
+    written: list[Path] = []
+    with tempfile.TemporaryDirectory(prefix=".mc_manager-stage-", dir=repository) as staging:
+        stage_root = Path(staging)
+        staged: dict[str, Path] = {}
+        for index, change in enumerate(plan.changes):
+            if change.kind == "delete":
+                continue
+            assert change.source is not None and change.sha256 is not None
+            candidate = stage_root / str(index)
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            with os.fdopen(os.open(change.source, flags), "rb") as source:
+                with candidate.open("wb") as out:
+                    shutil.copyfileobj(source, out, 1024 * 1024)
+            if sha256_file(candidate) != change.sha256:
+                raise SafetyError(f"Source changed during copy: {change.source}")
+            staged[change.path] = candidate
+
+        if plan.changed:
+            manifest = {
+                "schema": 1,
+                "instance": _metadata(plan.instance),
+                "files": plan.files,
+                "last_sync": datetime.now(UTC).isoformat(),
+            }
+            staged_manifest = stage_root / MANIFEST
+            with staged_manifest.open("w", encoding="utf-8") as stream:
                 json.dump(manifest, stream, indent=2, ensure_ascii=False, sort_keys=True)
                 stream.write("\n")
-            os.replace(temp_name, plan.destination / MANIFEST)
-        finally:
-            if os.path.exists(temp_name):
-                os.unlink(temp_name)
-        written.append(plan.destination / MANIFEST)
+
+        for change in plan.changes:
+            check_target(change)
+        if plan.changed:
+            assert_destination(repository, relative / MANIFEST)
+
+        for change in plan.changes:
+            target = check_target(change)
+            if change.kind == "delete":
+                target.unlink()
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(staged[change.path], target)
+            written.append(target)
+        if plan.changed:
+            plan.destination.mkdir(parents=True, exist_ok=True)
+            os.replace(staged_manifest, plan.destination / MANIFEST)
+            written.append(plan.destination / MANIFEST)
     return written

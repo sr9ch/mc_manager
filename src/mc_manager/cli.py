@@ -10,7 +10,18 @@ from pathlib import Path
 from . import __version__
 from .config import Config, config_path, data_path, load, save
 from .discovery import DiscoveryReport, discover_report
-from .git import GitError, clone, commit, dirty, has_origin, pull, push, stage, verify_repository
+from .git import (
+    GitError,
+    clone,
+    commit,
+    dirty,
+    ensure_commit_identity,
+    has_origin,
+    pull,
+    push,
+    stage,
+    verify_repository,
+)
 from .models import MinecraftInstance, Plan
 from .safety import SafetyError
 from .sync import apply_plan, destination_for, plan_instance
@@ -84,7 +95,11 @@ def show_scan(report: DiscoveryReport) -> None:
         elif client in {"prism", "legacy", "tlauncher", "sklauncher"}:
             print(f"✗ {NAMES[client]}: not found")
     known = report.installed - {"generic"}
-    print(f"\n{len(known)} launchers detected; {len(report.instances)} unique installations")
+    launcher_word = "launcher" if len(known) == 1 else "launchers"
+    installation_word = "installation" if len(report.instances) == 1 else "installations"
+    summary = f"{len(known)} {launcher_word} detected; "
+    summary += f"{len(report.instances)} unique {installation_word}"
+    print(f"\n{summary}")
     generic_count = report.clients.get("generic", 0)
     print(f"Discovery: generic {generic_count}; duplicates merged {report.duplicates_merged}")
 
@@ -93,7 +108,10 @@ def setup(report: DiscoveryReport) -> Config:
     print("\nWelcome to mc_manager. Configure a Git repository.")
     print("Found instances:")
     for number, instance in enumerate(report.instances, 1):
-        print(f"  {number}. {NAMES[instance.client]} / {instance.name} ({instance.game_dir})")
+        print(
+            f"  {number}. {NAMES[instance.client]} ({instance.client}) / "
+            f"{instance.name} ({instance.game_dir})"
+        )
     raw = input("Git repository path or SSH/HTTPS URL: ").strip()
     if not raw:
         raise GitError("A Git repository is required")
@@ -113,6 +131,7 @@ def setup(report: DiscoveryReport) -> Config:
         for part in excluded.split(","):
             if part.strip().isdigit() and 1 <= int(part.strip()) <= len(report.instances):
                 config.excluded_instances.append(report.instances[int(part.strip()) - 1].key)
+    print("Launcher IDs: " + ", ".join(sorted(report.installed - {"generic"})))
     clients = input("Launcher IDs to exclude (comma separated; Enter for all): ").strip()
     config.excluded_clients = [s.strip().lower() for s in clients.split(",") if s.strip()]
     save(config)
@@ -248,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
             and args.command is None
         ):
             if not sys.stdin.isatty():
-                print("Repository not configured. Run mc_manager interactively for setup.")
+                print("Setup requires an interactive terminal. Run mc_manager there.")
                 return 0
             config = setup(report)
         if config.repository is None:
@@ -271,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
             print("Synchronization skipped")
             _seen(report)
             return 0
+        if config.git_commit:
+            ensure_commit_identity(config.repository)
         changed_paths: list[Path] = []
         for plan in plans:
             if plan.changed:

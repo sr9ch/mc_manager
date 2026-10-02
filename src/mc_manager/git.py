@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 class GitError(RuntimeError):
@@ -41,6 +42,17 @@ def has_origin(repo: Path) -> bool:
     return "origin" in run(repo, "remote").splitlines()
 
 
+def ensure_commit_identity(repo: Path) -> None:
+    try:
+        run(repo, "var", "GIT_AUTHOR_IDENT")
+        run(repo, "var", "GIT_COMMITTER_IDENT")
+    except GitError as exc:
+        raise GitError(
+            "Git author identity is missing. Set user.name and user.email in the chosen repository "
+            "before synchronizing, or set git_commit = false in mc_manager config."
+        ) from exc
+
+
 def pull(repo: Path) -> None:
     if dirty(repo):
         raise GitError("Repository has unsaved changes; pull skipped")
@@ -48,13 +60,21 @@ def pull(repo: Path) -> None:
         run(repo, "pull", "--ff-only")
 
 
+def validate_remote_url(url: str) -> None:
+    if url.startswith(("https://", "ssh://")):
+        parts = urlsplit(url)
+        if not parts.hostname or not parts.path or parts.password or parts.query or parts.fragment:
+            raise GitError("Use an HTTPS or SSH Git URL without embedded credentials or query")
+        if parts.scheme == "https" and parts.username:
+            raise GitError("Use Git credential storage, not credentials in the URL")
+    elif not re.fullmatch(r"git@[^:\s]+:[^\s]+", url):
+        raise GitError("Use an HTTPS or SSH Git URL without embedded credentials")
+
+
 def clone(url: str, destination: Path) -> None:
     if destination.exists():
         raise GitError(f"Clone destination already exists: {destination}")
-    if not (
-        re.match(r"^(https://|ssh://|git@[^:]+:).+", url) and not re.match(r"^https?://[^/]*@", url)
-    ):
-        raise GitError("Use an HTTPS or SSH Git URL without embedded credentials")
+    validate_remote_url(url)
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
         process = subprocess.run(

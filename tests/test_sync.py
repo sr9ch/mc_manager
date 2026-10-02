@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 
 from mc_manager.config import Config, load, save
-from mc_manager.git import dirty, stage, verify_repository
+from mc_manager.git import GitError, dirty, stage, validate_remote_url, verify_repository
 from mc_manager.models import DetectedValue, MinecraftInstance
-from mc_manager.safety import SafetyError, safe_relative, slug
+from mc_manager.safety import SafetyError, safe_relative, slug, world_slug
 from mc_manager.sync import apply_plan, destination_for, plan_instance, source_files
 
 
@@ -111,6 +111,26 @@ class SyncTests(unittest.TestCase):
         with self.assertRaises(SafetyError):
             self.plan()
 
+    def test_changed_later_source_does_not_partially_apply_plan(self):
+        self.write("mods/a.jar", "first")
+        later = self.write("mods/z.jar", "second")
+        plan = self.plan()
+        later.write_text("changed after planning")
+        with self.assertRaises(SafetyError):
+            apply_plan(plan, self.repo)
+        self.assertFalse((self.repo / self.relative / "mods/a.jar").exists())
+        self.assertFalse((self.repo / self.relative / "mc_manager.json").exists())
+
+    def test_unmanaged_file_added_after_plan_is_preserved(self):
+        self.write("mods/a.jar", "same bytes")
+        plan = self.plan()
+        target = self.repo / self.relative / "mods/a.jar"
+        target.parent.mkdir(parents=True)
+        target.write_text("same bytes")
+        with self.assertRaises(SafetyError):
+            apply_plan(plan, self.repo)
+        self.assertEqual(target.read_text(), "same bytes")
+
     def test_destination_collision_and_slug(self):
         config = Config()
         used = set()
@@ -120,7 +140,9 @@ class SyncTests(unittest.TestCase):
         other = MinecraftInstance("prism", "Better MC", other_dir, other_dir)
         second = destination_for(other, config, used)
         self.assertNotEqual(first, second)
-        self.assertEqual(slug("  Bètter MC!  "), "b-tter-mc")
+        self.assertEqual(slug("  Bètter MC!  "), "bètter-mc")
+        self.assertEqual(slug("CON"), "con-instance")
+        self.assertTrue(world_slug("Новый мир").startswith("новый-мир-"))
         with self.assertRaises(SafetyError):
             safe_relative("../escape")
 
@@ -141,6 +163,22 @@ class SyncTests(unittest.TestCase):
         path.write_text("x")
         self.assertTrue(dirty(self.repo))
         self.assertTrue(stage(self.repo, [path]))
+
+    def test_remote_url_validation(self):
+        for url in (
+            "git@github.com:someone/minecraft-backup.git",
+            "ssh://git@example.org/someone/minecraft-backup.git",
+            "https://github.com/someone/minecraft-backup.git",
+        ):
+            validate_remote_url(url)
+        for url in (
+            "file:///tmp/repo.git",
+            "http://example.org/repo.git",
+            "https://user:token@example.org/repo.git",
+            "https://example.org/repo.git?token=secret",
+        ):
+            with self.assertRaises(GitError):
+                validate_remote_url(url)
 
 
 if __name__ == "__main__":

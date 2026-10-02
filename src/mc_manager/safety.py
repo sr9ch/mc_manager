@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import unicodedata
 from pathlib import Path
 
 
@@ -53,12 +54,24 @@ MAX_FILE = 100 * 1024 * 1024
 
 
 def slug(text: str) -> str:
-    clean = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60].strip("-")
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    clean = re.sub(r"[\W_]+", "-", normalized, flags=re.UNICODE).strip("-")[:60].strip("-")
+    if clean in {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        *(f"com{i}" for i in range(1, 10)),
+        *(f"lpt{i}" for i in range(1, 10)),
+    }:
+        clean += "-instance"
     return clean or "instance"
 
 
 def world_slug(text: str) -> str:
-    return f"{slug(text)}-{hashlib.sha256(text.encode()).hexdigest()[:8]}"
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    readable = re.sub(r"[\W_]+", "-", normalized, flags=re.UNICODE).strip("-")[:60]
+    return f"{readable or 'world'}-{hashlib.sha256(text.encode()).hexdigest()[:8]}"
 
 
 def safe_relative(path: str) -> Path:

@@ -31,6 +31,72 @@ mc_manager scan
 No repository URL is embedded in this project. To install from a remote source, clone
 its actual URL first, change into the checkout, then run `pipx install .`.
 
+## Choose a repository
+
+Use a **separate Git repository for Minecraft content**. Do not select this project's
+source-code repository. A new, empty private repository is the simplest choice;
+private visibility is prudent because mod configurations can contain personal data.
+`mc_manager` does not create a remote repository for you.
+
+Two setup options are supported:
+
+1. **Existing local working tree.** Create one if needed:
+
+   ```bash
+   mkdir -p ~/minecraft-configs
+   git -C ~/minecraft-configs init
+   git -C ~/minecraft-configs config user.name "Your Name"
+   git -C ~/minecraft-configs config user.email "you@example.com"
+   mc_manager config --setup
+   ```
+
+   At the repository prompt enter `~/minecraft-configs`. The path must be the Git
+   repository root, not a subdirectory or bare repository. It must be separate from
+   every Minecraft game directory. `mc_manager` accepts `~` or an absolute path;
+   a relative path is interpreted from the shell's current directory.
+
+2. **Existing remote repository.** Create an empty private repository at your Git
+   provider, then run `mc_manager config --setup` and paste its **clone URL**:
+
+   ```text
+   git@github.com:USER/minecraft-configs.git
+   ssh://git@example.org/USER/minecraft-configs.git
+   https://github.com/USER/minecraft-configs.git
+   ```
+
+   The names above are placeholders. The same URL forms work with other Git servers.
+   Press Enter for the default local clone at
+   `$XDG_DATA_HOME/mc_manager/repository` (usually
+   `~/.local/share/mc_manager/repository`), or enter another unused local path.
+   SSH authentication or a Git credential helper must already work. Passwords,
+   tokens, URL queries, `http://`, and `file://` clone URLs are not accepted.
+
+At the exclusion prompts, press Enter to include all detected instances and launchers.
+Before the first synchronization, configure `user.name` and `user.email` in the chosen
+local repository. For a direct remote clone at the default path, decline the first
+sync prompt and run:
+
+```bash
+git -C ~/.local/share/mc_manager/repository config user.name "Your Name"
+git -C ~/.local/share/mc_manager/repository config user.email "you@example.com"
+```
+
+Then run `mc_manager` again. If you chose another clone path, use that path in both
+commands. The repository must be clean before every sync. Setting `git_commit = false`
+leaves changes for you to commit manually; the next sync will wait until the repository
+is clean. After setup:
+
+```bash
+mc_manager scan
+mc_manager status
+mc_manager sync --dry-run
+mc_manager
+```
+
+The final command shows changes and asks before copying. After copying it offers a
+Git commit and, when `origin` exists, a push. A local-only repository has no push
+target until you add a remote.
+
 ## What it does
 
 - Finds launcher instances and unknown Minecraft installations on every run.

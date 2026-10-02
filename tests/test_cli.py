@@ -7,9 +7,10 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from mc_manager.cli import main
-from mc_manager.config import Config, save
+from mc_manager.cli import main, setup
+from mc_manager.config import Config, load, save
 from mc_manager.discovery import DiscoveryReport
+from mc_manager.git import GitError
 from mc_manager.models import DetectedValue, MinecraftInstance
 
 
@@ -67,6 +68,25 @@ class CliTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(main(["sync"]), 1)
         self.assertIn("uncommitted changes", err.getvalue())
+        self.assertFalse((self.repo / "minecraft").exists())
+
+    def test_setup_existing_local_repository(self):
+        with patch("builtins.input", side_effect=[str(self.repo), "1", "prism"]):
+            with redirect_stdout(io.StringIO()):
+                chosen = setup(self.report)
+        self.assertEqual(chosen.repository, self.repo)
+        self.assertEqual(chosen.excluded_instances, [self.report.instances[0].key])
+        self.assertEqual(load().excluded_clients, ["prism"])
+
+    def test_missing_git_identity_blocks_before_copy(self):
+        save(Config(self.repo, ask_before_sync=False, git_commit=True))
+        with patch(
+            "mc_manager.cli.ensure_commit_identity", side_effect=GitError("identity missing")
+        ):
+            with patch("sys.stderr", new_callable=io.StringIO) as err:
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["sync"]), 1)
+        self.assertIn("identity missing", err.getvalue())
         self.assertFalse((self.repo / "minecraft").exists())
 
 
