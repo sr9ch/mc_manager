@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 from . import __version__
@@ -74,11 +75,9 @@ def show_scan(report: DiscoveryReport) -> None:
             continue
         if client in report.installed:
             mark = "?" if client == "generic" else "✓"
-            print(
-                f"{mark} {NAMES[client]}: {count} candidate(s)"
-                if client == "generic"
-                else f"{mark} {NAMES[client]}: {count} installation(s)"
-            )
+            noun = "candidate" if client == "generic" else "installation"
+            noun += "" if count == 1 else "s"
+            print(f"{mark} {NAMES[client]}: {count} {noun}")
             for instance in report.instances:
                 if client not in (instance.launchers or (instance.client,)):
                     continue
@@ -168,25 +167,49 @@ def make_plans(report: DiscoveryReport, config: Config, selected: str | None = N
     return plans
 
 
-def show_plans(plans: list[Plan]) -> None:
+def show_plans(plans: list[Plan], verbose: bool = False) -> None:
     changed = [p for p in plans if p.changed]
     print(f"\n{len(changed)} changed; {len(plans) - len(changed)} unchanged")
     for plan in changed:
         print(f"\n{NAMES.get(plan.instance.client, plan.instance.client)} / {plan.instance.name}")
         if not plan.changes:
             print("  metadata changed")
-        for change in plan.changes:
+            continue
+        kinds = Counter(change.kind for change in plan.changes)
+        categories = Counter(change.path.split("/", 1)[0] for change in plan.changes)
+        print(f"  +{kinds['add']} added  ~{kinds['modify']} updated  -{kinds['delete']} removed")
+        print(
+            "  "
+            + ", ".join(
+                f"{category} {count}"
+                for category, count in sorted(
+                    categories.items(), key=lambda item: (-item[1], item[0])
+                )
+            )
+        )
+        ordered = sorted(
+            plan.changes,
+            key=lambda change: ({"delete": 0, "modify": 1, "add": 2}[change.kind], change.path),
+        )
+        shown = ordered if verbose else ordered[:12]
+        for change in shown:
             prefix = {"add": "+", "modify": "~", "delete": "-"}[change.kind]
             print(f"  {prefix} {change.path}")
+        if len(shown) < len(ordered):
+            print(f"  ... {len(ordered) - len(shown)} more paths (use --verbose for all)")
 
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="mc_manager",
         description="Discover Minecraft installations and sync selected content to Git",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Examples:\n  mc_manager\n  mc_manager scan\n  mc_manager sync --dry-run",
     )
     p.add_argument("--version", action="version", version=f"mc_manager {__version__}")
-    p.add_argument("--verbose", action="store_true")
+    p.add_argument(
+        "--verbose", action="store_true", help="Show every changed path and scan diagnostics"
+    )
     sub = p.add_subparsers(dest="command")
     scan = sub.add_parser("scan", help="Discover launchers and instances")
     scan.add_argument(
@@ -259,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
             if config.git_pull and has_origin(config.repository):
                 pull(config.repository)
         plans = make_plans(report, config, args.instance if args.command == "sync" else None)
-        show_plans(plans)
+        show_plans(plans, verbose=args.verbose)
         if args.command == "status" or dry_run or not any(p.changed for p in plans):
             return 0
         if config.ask_before_sync and not (sys.stdin.isatty() and ask("Synchronize changes?")):

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.2.2 — 2026-10-02
+
+### Improved
+
+- Summarize large sync plans and show their full file list with `--verbose`.
+- Keep package contents explicit and include contributor and release notes in
+  source distributions.
+- Use a deque for bounded filesystem discovery.
+
 ## 0.2.1 — 2026-10-02
 
 ### Fixed

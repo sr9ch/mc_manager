@@ -62,6 +62,23 @@ class CliTests(unittest.TestCase):
             self.assertEqual(main(["status"]), 0)
         self.assertIn("0 changed", output.getvalue())
 
+    def test_large_plan_is_short_by_default_and_complete_when_verbose(self):
+        for number in range(20):
+            (self.game / "mods" / f"extra-{number:02}.jar").write_text("mod")
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["sync", "--dry-run"]), 0)
+        self.assertIn("+21 added", output.getvalue())
+        self.assertIn("... 9 more paths (use --verbose for all)", output.getvalue())
+        self.assertNotIn("+ mods/extra-19.jar", output.getvalue())
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["--verbose", "sync", "--dry-run"]), 0)
+        self.assertIn("+ mods/extra-19.jar", output.getvalue())
+        self.assertNotIn("more paths", output.getvalue())
+
     def test_dirty_repo_blocks_sync(self):
         (self.repo / "user.txt").write_text("leave me alone")
         with patch("sys.stderr", new_callable=io.StringIO) as err:

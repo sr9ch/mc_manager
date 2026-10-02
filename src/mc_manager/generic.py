@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -145,9 +146,9 @@ class GenericFilesystemDiscovery:
     def scan(self, debug: bool = False) -> GenericResult:
         result = GenericResult()
         visited: set[tuple[int, int]] = set()
-        queue: list[tuple[Path, int]] = [(p, 0) for p in self.roots]
+        queue = deque((p, 0) for p in self.roots)
         while queue and result.visited < self.max_visited:
-            path, depth = queue.pop(0)
+            path, depth = queue.popleft()
             try:
                 if path.is_symlink() or not path.is_dir():
                     continue

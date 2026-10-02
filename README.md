@@ -1,8 +1,8 @@
 # mc_manager
 
-Discover Minecraft game directories and keep selected modpack files in a Git repository.
-Built for Fedora Linux, with XDG paths and adapters that can be extended for other systems.
-Requires Python 3.11 or newer.
+Find local Minecraft installations, see what changed, and save selected modpack files
+to Git. Designed for Fedora Linux and XDG directories. Runs on Python 3.11+ with no
+third-party runtime dependencies.
 
 ## Quick start
 
@@ -19,8 +19,8 @@ previous scan. It reports new or missing launchers and instances, changed Minecr
 or loader versions, and added, edited, or removed modpack files. The first scan saves
 a baseline and offers Git setup when run interactively. Press Enter to continue
 without a repository; connect one only if you want to synchronize selected content.
-This checks versions installed on your computer,
-not new Minecraft releases on the internet.
+This checks versions installed on your computer, not new Minecraft releases on the
+internet.
 
 To connect a repository, run `mc_manager config --setup`. For a remote URL,
 `mc_manager` clones a local copy under your XDG data directory unless you choose
@@ -133,10 +133,10 @@ Minecraft Manager
 
 Scanning clients...
 
-✓ Prism Launcher: 0 installation(s)
+✓ Prism Launcher: 0 installations
 ✗ Legacy Launcher: not found
 ✗ TLauncher: not found
-✓ SKLauncher: 2 installation(s)
+✓ SKLauncher: 2 installations
   └─ 1.21.11: 1.21.11, fabric 0.19.5 [detected]
   └─ 26.3: 26.3, quilt 0.31.0-beta.4 [detected]
 
@@ -199,6 +199,10 @@ independent instances; unplayed empty entries are not synchronized.
 | `mc_manager config` | Show configuration path and repository |
 | `mc_manager config --setup` | Run the setup wizard again |
 | `mc_manager --version` | Show installed version |
+
+Large change plans show totals by change type and directory, followed by the first
+12 paths. Use `mc_manager --verbose status` or `mc_manager --verbose sync --dry-run`
+to see every path. The global `--verbose` flag goes before the command.
 
 `status`, `scan`, and `sync --dry-run` never copy or delete Minecraft content. A
 noninteractive invocation with `ask_before_sync = true` prints the plan and skips
