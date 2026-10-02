@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.2.0 — 2026-10-02
+
+### Added
+
+- Launch with `mc_manager` to rescan local installations and compare launchers,
+  instances, Minecraft/loader versions, and managed content with the previous scan.
+- Allow scanning without configuring a Git repository; repository setup is explicit.
+- Preserve existing discovery history when upgrading the scan state format.
+
 ## 0.1.1 — 2026-10-02
 
 ### Fixed

@@ -84,7 +84,7 @@ def _walk_content(
                 if safe_content(source, relative.parts[0]):
                     found[relative.as_posix()] = source
                 else:
-                    LOG.warning("Skipped possible secret or oversized file: %s", source)
+                    LOG.info("Skipped possible secret or oversized file: %s", source)
             except OSError as exc:
                 LOG.warning("Cannot inspect %s: %s", source, exc)
     return found

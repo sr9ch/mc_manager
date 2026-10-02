@@ -13,11 +13,20 @@ pipx install .
 mc_manager
 ```
 
-On the first interactive run, choose an existing Git repository root or an SSH/HTTPS Git URL.
-For a remote URL, `mc_manager` clones a local copy under your XDG data directory unless
-you choose another location. The wizard lists discovered installations and lets you
-exclude clients or individual game directories. Later runs scan again and show pending
-changes before asking to synchronize.
+Run `mc_manager` from any terminal whenever you want to check your installations.
+Every launch scans local launchers and game directories, then compares them with the
+previous scan. It reports new or missing launchers and instances, changed Minecraft
+or loader versions, and added, edited, or removed modpack files. The first scan saves
+a baseline and offers Git setup when run interactively. Press Enter to continue
+without a repository; connect one only if you want to synchronize selected content.
+This checks versions installed on your computer,
+not new Minecraft releases on the internet.
+
+To connect a repository, run `mc_manager config --setup`. For a remote URL,
+`mc_manager` clones a local copy under your XDG data directory unless you choose
+another location. The wizard lists discovered installations and lets you exclude
+clients or individual game directories. Once configured, `mc_manager` also shows
+pending repository changes and asks before synchronizing.
 
 For a development checkout:
 
@@ -100,6 +109,9 @@ target until you add a remote.
 ## What it does
 
 - Finds launcher instances and unknown Minecraft installations on every run.
+- Compares every scan with the previous one, including locally installed versions
+  and eligible modpack files. The quick comparison uses file size and modification
+  time; synchronization separately verifies file contents with SHA-256.
 - Reads Prism components, launcher profiles, and version JSON for Minecraft and loader
   versions. Values are marked `detected`, `inferred`, or `unknown`.
 - Merges results that point to the same physical game directory, so shared launcher
@@ -176,8 +188,8 @@ independent instances; unplayed empty entries are not synchronized.
 
 | Command | Effect |
 | --- | --- |
-| `mc_manager` | Scan, show pending changes, ask to synchronize |
-| `mc_manager scan [--force] [--debug]` | Discover and display launchers and instances |
+| `mc_manager` | Scan, show changes since the last launch, then offer sync if configured |
+| `mc_manager scan [--force] [--debug]` | Scan and display launchers, instances, and recent changes |
 | `mc_manager status` | Show pending file and metadata changes |
 | `mc_manager sync [name] [--dry-run]` | Sync all enabled instances or a matching name |
 | `mc_manager clients` | Show launcher discovery results |
@@ -212,8 +224,8 @@ time, and SHA-256 hashes of managed files. It contains no absolute machine paths
 World slugs include a short hash to prevent collisions between similar names.
 
 Configuration is human-readable TOML at `$XDG_CONFIG_HOME/mc_manager/config.toml`,
-or `~/.config/mc_manager/config.toml`. New-client notifications use
-`$XDG_STATE_HOME/mc_manager/seen.json`. A remote clone defaults to
+or `~/.config/mc_manager/config.toml`. Scan history is stored in
+`$XDG_STATE_HOME/mc_manager/seen.json` with owner-only permissions. A remote clone defaults to
 `$XDG_DATA_HOME/mc_manager/repository`.
 
 ```toml

@@ -60,17 +60,24 @@ class EndToEndTests(unittest.TestCase):
                 return result.stdout
 
             target = repository / "minecraft/prism/pack/mods/example.jar"
-            self.assertIn("1 unique installation", invoke("scan"))
+            first_scan = invoke("scan")
+            self.assertIn("1 unique installation", first_scan)
+            self.assertIn("First scan saved as baseline", first_scan)
             self.assertIn("+ mods/example.jar", invoke("sync", "--dry-run"))
             self.assertFalse(target.exists())
             invoke("sync")
             self.assertEqual(target.read_text(), "first")
             mod.write_text("second")
+            self.assertIn("Content changed in Pack: +0 ~1 -0 files", invoke("scan"))
             self.assertIn("~ mods/example.jar", invoke("sync"))
             self.assertEqual(target.read_text(), "second")
             mod.unlink()
             self.assertIn("- mods/example.jar", invoke("sync"))
             self.assertFalse(target.exists())
+            (instance / "mmc-pack.json").write_text(
+                json.dumps({"components": [{"uid": "net.minecraft", "version": "1.21.2"}]})
+            )
+            self.assertIn("Minecraft version changed in Pack: 1.21.1 → 1.21.2", invoke("scan"))
             self.assertEqual(
                 subprocess.check_output(
                     ["git", "-C", str(repository), "status", "--porcelain"], text=True

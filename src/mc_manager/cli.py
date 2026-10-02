@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import sys
@@ -24,6 +23,7 @@ from .git import (
 )
 from .models import MinecraftInstance, Plan
 from .safety import SafetyError
+from .scan_state import report_changes
 from .sync import apply_plan, destination_for, plan_instance
 
 NAMES = {
@@ -180,39 +180,6 @@ def show_plans(plans: list[Plan]) -> None:
             print(f"  {prefix} {change.path}")
 
 
-def _seen(report: DiscoveryReport) -> None:
-    path = state_path()
-    try:
-        old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except (OSError, ValueError):
-        old = {}
-    old_clients = set(old.get("clients", []))
-    old_instances = set(old.get("instances", []))
-    current_clients = report.installed - {"generic"}
-    for client in sorted(current_clients - old_clients):
-        print(f"New Minecraft client detected: {NAMES.get(client, client)}")
-    for instance in report.instances:
-        if instance.key not in old_instances:
-            launcher = NAMES.get(instance.client, instance.client)
-            print(f"New Minecraft instance: {launcher} / {instance.name}")
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(
-            json.dumps(
-                {
-                    "clients": sorted(current_clients),
-                    "instances": [i.key for i in report.instances],
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        tmp.replace(path)
-    except OSError as exc:
-        logging.warning("Could not save discovery state: %s", exc)
-
-
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="mc_manager",
@@ -250,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Config: {config_path()}\nRepository: {config.repository or 'not configured'}")
             return 0
         config = load()
+        first_launch = not state_path().exists()
         report = discover_report(
             extra_roots=config.extra_roots, debug=getattr(args, "debug", False)
         )
@@ -257,23 +225,30 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "debug", False):
             for line in report.debug:
                 print(line)
+        print("\nChanges since last scan:")
+        for line in report_changes(report, state_path(), config.ignores, NAMES):
+            print(line)
         if args.command in {"scan", "clients", "instances"}:
-            _seen(report)
             return 0
-        if (
-            args.command == "config"
-            and args.setup
-            or config.repository is None
-            and args.command is None
-        ):
+        if args.command == "config" and args.setup:
             if not sys.stdin.isatty():
                 print("Setup requires an interactive terminal. Run mc_manager there.")
-                return 0
+                return 1
             config = setup(report)
         if config.repository is None:
-            raise GitError(
-                "Repository is not configured. Run mc_manager interactively to set it up."
-            )
+            if args.command is None:
+                if (
+                    first_launch
+                    and sys.stdin.isatty()
+                    and ask("Connect a Git repository for synchronization?", False)
+                ):
+                    config = setup(report)
+                else:
+                    print("\nGit repository not configured.")
+                    print("Run mc_manager config --setup to enable sync.")
+                    return 0
+            else:
+                raise GitError("Repository is not configured. Run mc_manager config --setup.")
         dry_run = args.command == "sync" and args.dry_run
         if args.command != "status" and not dry_run:
             verify_repository(config.repository)
@@ -284,11 +259,9 @@ def main(argv: list[str] | None = None) -> int:
         plans = make_plans(report, config, args.instance if args.command == "sync" else None)
         show_plans(plans)
         if args.command == "status" or dry_run or not any(p.changed for p in plans):
-            _seen(report)
             return 0
         if config.ask_before_sync and not (sys.stdin.isatty() and ask("Synchronize changes?")):
             print("Synchronization skipped")
-            _seen(report)
             return 0
         if config.git_commit:
             ensure_commit_identity(config.repository)
@@ -317,7 +290,6 @@ def main(argv: list[str] | None = None) -> int:
                 ):
                     push(config.repository)
                     print("Pushed to origin.")
-        _seen(report)
         return 0
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)

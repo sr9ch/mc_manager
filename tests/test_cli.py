@@ -89,6 +89,29 @@ class CliTests(unittest.TestCase):
         self.assertIn("identity missing", err.getvalue())
         self.assertFalse((self.repo / "minecraft").exists())
 
+    def test_default_launch_scans_without_repository(self):
+        save(Config())
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main([]), 0)
+        self.assertIn("First scan saved as baseline", output.getvalue())
+        self.assertIn("mc_manager config --setup", output.getvalue())
+        self.assertFalse((self.repo / "minecraft").exists())
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main([]), 0)
+        self.assertIn("No changes since last scan", output.getvalue())
+
+    def test_first_interactive_launch_offers_repository_setup(self):
+        save(Config())
+        with patch("mc_manager.cli.sys.stdin") as stdin:
+            stdin.isatty.return_value = True
+            with patch("builtins.input", side_effect=["y", str(self.repo), "", "", "n"]):
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(main([]), 0)
+        self.assertEqual(load().repository, self.repo)
+        self.assertFalse((self.repo / "minecraft").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
