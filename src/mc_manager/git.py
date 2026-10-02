@@ -1,13 +1,56 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 import subprocess
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from .paths import state_dir
 
 
 class GitError(RuntimeError):
     pass
+
+
+@contextmanager
+def repository_lock(repo: Path):
+    """Prevent concurrent mc_manager runs from changing the same repository."""
+    directory = state_dir() / "locks"
+    directory.mkdir(parents=True, exist_ok=True)
+    name = hashlib.sha256(str(repo.resolve()).encode("utf-8")).hexdigest() + ".lock"
+    descriptor = os.open(directory / name, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            if os.fstat(descriptor).st_size == 0:
+                os.write(descriptor, b"0")
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            try:
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            except OSError as exc:
+                raise GitError("Another mc_manager process is using this repository") from exc
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                raise GitError("Another mc_manager process is using this repository") from exc
+        try:
+            yield
+        finally:
+            if sys.platform == "win32":
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 def run(repo: Path, *args: str) -> str:

@@ -16,22 +16,28 @@ SCHEMA = 3
 DETAIL_LIMIT = 12
 
 
-def _load(path: Path) -> tuple[dict, bool]:
+def _load(path: Path) -> tuple[dict | None, bool]:
+    if path.is_symlink():
+        LOG.warning("Previous scan state is a symlink: %s", path)
+        return None, False
     if not path.exists():
         return {}, True
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return (data if isinstance(data, dict) else {}), False
+        if not isinstance(data, dict):
+            raise ValueError("scan state must contain a JSON object")
+        return data, False
     except (OSError, ValueError) as exc:
         LOG.warning("Could not read previous scan: %s", exc)
-        return {}, True
+        return None, False
 
 
-def _snapshot(report: DiscoveryReport, ignores: list[str], old: dict) -> dict:
+def _snapshot(report: DiscoveryReport, ignores: list[str], old: dict) -> tuple[dict, list[str]]:
     old_instances = old.get("instances", {})
     if not isinstance(old_instances, dict):
         old_instances = {}
     instances = {}
+    warnings = []
     for instance in report.instances:
         previous = old_instances.get(instance.key, {})
         try:
@@ -41,6 +47,9 @@ def _snapshot(report: DiscoveryReport, ignores: list[str], old: dict) -> dict:
                 files[name] = [stat.st_size, stat.st_mtime_ns]
         except (OSError, SafetyError) as exc:
             LOG.warning("Could not inspect %s: %s", instance.game_dir, exc)
+            warnings.append(
+                f"Could not inspect {instance.name}; scan history was not updated: {exc}"
+            )
             files = previous.get("files", {}) if isinstance(previous, dict) else {}
         instances[instance.key] = {
             "name": instance.name,
@@ -54,7 +63,7 @@ def _snapshot(report: DiscoveryReport, ignores: list[str], old: dict) -> dict:
         "schema": SCHEMA,
         "clients": sorted(report.installed - {"generic"}),
         "instances": instances,
-    }
+    }, warnings
 
 
 def _file_changes(name: str, before: dict, after: dict) -> list[str]:
@@ -135,8 +144,14 @@ def report_changes(
     launcher_names: Mapping[str, str] | None = None,
 ) -> list[str]:
     old, first_scan = _load(path)
-    current = _snapshot(report, ignores or [], old)
+    if old is None:
+        return [f"Cannot read {path}; scan history was left untouched."]
+    current, warnings = _snapshot(report, ignores or [], old)
     lines = _changes(old, current, first_scan, launcher_names or {})
+    if warnings:
+        if first_scan:
+            lines = ["First scan could not be saved."]
+        return [*lines, *warnings]
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temp_name = tempfile.mkstemp(prefix=".seen-", dir=path.parent)
@@ -144,6 +159,8 @@ def report_changes(
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                 json.dump(current, stream, indent=2, ensure_ascii=False, sort_keys=True)
                 stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
             os.chmod(temp_name, 0o600)
             os.replace(temp_name, path)
         finally:

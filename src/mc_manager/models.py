@@ -43,6 +43,7 @@ class Plan:
     changes: list[Change]
     files: dict[str, str]
     metadata_changed: bool = False
+    manifest_hash: str | None = None
 
     @property
     def changed(self) -> bool:

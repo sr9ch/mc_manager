@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mc_manager.discovery import DiscoveryReport
 from mc_manager.models import DetectedValue, MinecraftInstance
@@ -64,6 +65,29 @@ class ScanStateTests(unittest.TestCase):
             report = DiscoveryReport([instance], {"prism": 1}, {"prism"}, [])
             self.assertEqual(report_changes(report, state), ["No changes since last scan."])
             self.assertEqual(json.loads(state.read_text())["schema"], 3)
+
+    def test_corrupt_state_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "seen.json"
+            state.write_text("{broken", encoding="utf-8")
+            report = DiscoveryReport([], {}, set(), [])
+            lines = report_changes(report, state)
+            self.assertIn("scan history was left untouched", lines[0])
+            self.assertEqual(state.read_text(), "{broken")
+
+    def test_failed_content_scan_does_not_advance_history(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game = root / "game"
+            game.mkdir()
+            state = root / "seen.json"
+            instance = MinecraftInstance("prism", "Pack", game, game)
+            report = DiscoveryReport([instance], {"prism": 1}, {"prism"}, [])
+            with patch("mc_manager.scan_state.source_files", side_effect=PermissionError("denied")):
+                lines = report_changes(report, state)
+            self.assertIn("First scan could not be saved", lines[0])
+            self.assertFalse(state.exists())
 
 
 if __name__ == "__main__":

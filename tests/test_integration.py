@@ -42,6 +42,9 @@ class EndToEndTests(unittest.TestCase):
             environment = {
                 **os.environ,
                 "HOME": str(home),
+                "USERPROFILE": str(home),
+                "APPDATA": str(home / "AppData/Roaming"),
+                "LOCALAPPDATA": str(home / "AppData/Local"),
                 "XDG_DATA_HOME": str(data),
                 "XDG_CONFIG_HOME": str(config_home),
                 "XDG_STATE_HOME": str(state),

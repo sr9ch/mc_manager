@@ -5,9 +5,6 @@ import json
 import logging
 import os
 import re
-import shutil
-import tempfile
-from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import Config
@@ -96,7 +93,7 @@ def _walk_content(
                 else:
                     LOG.info("Skipped possible secret or oversized file: %s", source)
             except OSError as exc:
-                LOG.warning("Cannot inspect %s: %s", source, exc)
+                raise SafetyError(f"Cannot inspect source file {source}: {exc}") from exc
     return found
 
 
@@ -186,6 +183,8 @@ def plan_instance(
     destination = repository / relative
     assert_destination(repository, relative / MANIFEST)
     old = _manifest(destination / MANIFEST)
+    manifest_path = destination / MANIFEST
+    manifest_hash = sha256_file(manifest_path) if manifest_path.exists() else None
     owned: dict[str, str] = old.get("files", {})
     current = source_files(instance, ignores)
     hashes: dict[str, str] = {}
@@ -214,89 +213,20 @@ def plan_instance(
                 raise SafetyError(f"Managed file edited in repository: {target}")
             changes.append(Change("delete", name))
     metadata_changed = old.get("instance") != _metadata(instance) or old.get("files") != hashes
-    return Plan(instance, destination, changes, hashes, metadata_changed)
+    return Plan(instance, destination, changes, hashes, metadata_changed, manifest_hash)
+
+
+def apply_plans(plans: list[Plan], repository: Path) -> list[Path]:
+    from .transaction import apply_plans as transactional_apply
+
+    return transactional_apply(plans, repository)
 
 
 def apply_plan(plan: Plan, repository: Path) -> list[Path]:
-    assert_plain_directory(repository)
-    relative = plan.destination.relative_to(repository)
-    old = _manifest(plan.destination / MANIFEST)
+    return apply_plans([plan], repository)
 
-    def check_target(change: Change) -> Path:
-        target = assert_destination(repository, relative / safe_relative(change.path))
-        if change.kind == "delete":
-            if not target.exists() or sha256_file(target) != old.get("files", {}).get(change.path):
-                raise SafetyError(f"Destination changed since scan: {target}")
-        elif change.kind == "add":
-            if target.exists():
-                raise SafetyError(f"Unmanaged file appeared since scan: {target}")
-        elif change.kind == "modify":
-            if not target.exists() or sha256_file(target) not in {
-                old.get("files", {}).get(change.path),
-                change.sha256,
-            }:
-                raise SafetyError(f"Destination changed since scan: {target}")
-        else:
-            raise SafetyError(f"Unknown change type: {change.kind}")
-        return target
 
-    # Validate every path before touching managed files. Changed source files are
-    # staged inside the repository filesystem so a late source change cannot leave
-    # an earlier new file behind without an updated manifest.
-    for change in plan.changes:
-        check_target(change)
-        if change.kind != "delete":
-            if change.source is None or change.sha256 is None or change.source.is_symlink():
-                raise SafetyError(f"Source changed since scan: {change.source}")
-            if sha256_file(change.source) != change.sha256 or not safe_content(
-                change.source, Path(change.path).parts[0]
-            ):
-                raise SafetyError(f"Source changed since scan: {change.source}")
+def recover_transaction(repository: Path) -> bool:
+    from .transaction import recover_transaction as transactional_recover
 
-    written: list[Path] = []
-    with tempfile.TemporaryDirectory(prefix=".mc_manager-stage-", dir=repository) as staging:
-        stage_root = Path(staging)
-        staged: dict[str, Path] = {}
-        for index, change in enumerate(plan.changes):
-            if change.kind == "delete":
-                continue
-            assert change.source is not None and change.sha256 is not None
-            candidate = stage_root / str(index)
-            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            with os.fdopen(os.open(change.source, flags), "rb") as source:
-                with candidate.open("wb") as out:
-                    shutil.copyfileobj(source, out, 1024 * 1024)
-            if sha256_file(candidate) != change.sha256:
-                raise SafetyError(f"Source changed during copy: {change.source}")
-            staged[change.path] = candidate
-
-        if plan.changed:
-            manifest = {
-                "schema": 1,
-                "instance": _metadata(plan.instance),
-                "files": plan.files,
-                "last_sync": datetime.now(UTC).isoformat(),
-            }
-            staged_manifest = stage_root / MANIFEST
-            with staged_manifest.open("w", encoding="utf-8") as stream:
-                json.dump(manifest, stream, indent=2, ensure_ascii=False, sort_keys=True)
-                stream.write("\n")
-
-        for change in plan.changes:
-            check_target(change)
-        if plan.changed:
-            assert_destination(repository, relative / MANIFEST)
-
-        for change in plan.changes:
-            target = check_target(change)
-            if change.kind == "delete":
-                target.unlink()
-            else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(staged[change.path], target)
-            written.append(target)
-        if plan.changed:
-            plan.destination.mkdir(parents=True, exist_ok=True)
-            os.replace(staged_manifest, plan.destination / MANIFEST)
-            written.append(plan.destination / MANIFEST)
-    return written
+    return transactional_recover(repository)

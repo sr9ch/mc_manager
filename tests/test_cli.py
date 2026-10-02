@@ -10,7 +10,7 @@ from unittest.mock import patch
 from mc_manager.cli import main, setup
 from mc_manager.config import Config, load, save
 from mc_manager.discovery import DiscoveryReport
-from mc_manager.git import GitError
+from mc_manager.git import GitError, repository_lock
 from mc_manager.models import DetectedValue, MinecraftInstance
 
 
@@ -85,6 +85,23 @@ class CliTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(main(["sync"]), 1)
         self.assertIn("uncommitted changes", err.getvalue())
+        self.assertFalse((self.repo / "minecraft").exists())
+
+    def test_sync_recovers_interrupted_cleanup_before_dirty_check(self):
+        transaction = self.repo / ".mc_manager-transaction"
+        transaction.mkdir()
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["sync"]), 0)
+        self.assertIn("Recovered an interrupted synchronization", output.getvalue())
+        self.assertFalse(transaction.exists())
+
+    def test_concurrent_repository_use_is_reported(self):
+        with repository_lock(self.repo):
+            with patch("sys.stderr", new_callable=io.StringIO) as err:
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["sync"]), 1)
+        self.assertIn("Another mc_manager process", err.getvalue())
         self.assertFalse((self.repo / "minecraft").exists())
 
     def test_setup_existing_local_repository(self):

@@ -9,7 +9,7 @@ from mc_manager.config import Config, load, save
 from mc_manager.git import GitError, dirty, stage, validate_remote_url, verify_repository
 from mc_manager.models import DetectedValue, MinecraftInstance
 from mc_manager.safety import SafetyError, safe_relative, slug, world_slug
-from mc_manager.sync import apply_plan, destination_for, plan_instance, source_files
+from mc_manager.sync import apply_plan, apply_plans, destination_for, plan_instance, source_files
 
 
 class SyncTests(unittest.TestCase):
@@ -40,6 +40,12 @@ class SyncTests(unittest.TestCase):
 
     def plan(self):
         return plan_instance(self.instance, self.repo, self.relative)
+
+    def link(self, path: Path, target: Path, directory: bool = False) -> None:
+        try:
+            path.symlink_to(target, target_is_directory=directory)
+        except OSError as exc:
+            self.skipTest(f"Symlinks are unavailable on this runner: {exc}")
 
     def test_add_modify_delete_and_manifest(self):
         source = self.write("mods/sodium.jar", "a")
@@ -85,14 +91,14 @@ class SyncTests(unittest.TestCase):
         outside = self.base / "secret.txt"
         outside.write_text("secret")
         (self.game / "mods").mkdir()
-        (self.game / "mods/link.jar").symlink_to(outside)
+        self.link(self.game / "mods/link.jar", outside)
         with self.assertRaisesRegex(SafetyError, "Symlinked source file"):
             source_files(self.instance)
 
     def test_ignored_symlinked_category_is_skipped(self):
         shared = self.base / "shared"
         shared.mkdir()
-        (self.game / "mods").symlink_to(shared, target_is_directory=True)
+        self.link(self.game / "mods", shared, directory=True)
         self.assertEqual(source_files(self.instance, ["mods"]), {})
 
     def test_replaced_source_directory_does_not_delete_backup(self):
@@ -101,14 +107,14 @@ class SyncTests(unittest.TestCase):
         backup = self.repo / self.relative / "mods/nested/a.jar"
         shared = self.base / "shared"
         mod.parent.rename(shared)
-        mod.parent.symlink_to(shared, target_is_directory=True)
+        self.link(mod.parent, shared, directory=True)
         with self.assertRaisesRegex(SafetyError, "Symlinked source directory"):
             self.plan()
         self.assertTrue(backup.exists())
 
     def test_destination_symlink_is_rejected(self):
         self.write("mods/a.jar")
-        (self.repo / "minecraft").symlink_to(self.base, target_is_directory=True)
+        self.link(self.repo / "minecraft", self.base, directory=True)
         with self.assertRaises(SafetyError):
             self.plan()
 
@@ -173,6 +179,65 @@ class SyncTests(unittest.TestCase):
         with self.assertRaises(SafetyError):
             apply_plan(plan, self.repo)
         self.assertEqual(target.read_text(), "same bytes")
+
+    def test_failure_during_apply_restores_all_instances(self):
+        source = self.write("mods/a.jar", "initial")
+        apply_plan(self.plan(), self.repo)
+        other_game = self.base / "other-game"
+        (other_game / "mods").mkdir(parents=True)
+        (other_game / "mods/b.jar").write_text("other")
+        other = MinecraftInstance("prism", "Other", other_game, other_game)
+        source.write_text("changed")
+        first = self.plan()
+        second = plan_instance(other, self.repo, Path("minecraft/prism/other"))
+        original_replace = __import__("os").replace
+
+        def fail_once(source_path, destination_path):
+            if str(destination_path).endswith("other/mods/b.jar"):
+                with patch("mc_manager.transaction.os.replace", original_replace):
+                    raise OSError("simulated disk failure")
+            return original_replace(source_path, destination_path)
+
+        with patch("mc_manager.transaction.os.replace", side_effect=fail_once):
+            with self.assertRaisesRegex(OSError, "simulated disk failure"):
+                apply_plans([first, second], self.repo)
+        self.assertEqual((self.repo / self.relative / "mods/a.jar").read_text(), "initial")
+        self.assertFalse((self.repo / "minecraft/prism/other/mods/b.jar").exists())
+        self.assertFalse((self.repo / ".mc_manager-transaction").exists())
+
+    def test_recovery_restores_interrupted_write(self):
+        from mc_manager.transaction import (
+            TRANSACTION,
+            _prepare,
+            _write_journal,
+            recover_transaction,
+        )
+
+        source = self.write("mods/a.jar", "initial")
+        apply_plan(self.plan(), self.repo)
+        source.write_text("changed")
+        plan = self.plan()
+        root = self.repo / TRANSACTION
+        root.mkdir()
+        (root / "new").mkdir()
+        (root / "old").mkdir()
+        operations = _prepare([plan], self.repo, root)
+        _write_journal(root, "ready", operations)
+        target = self.repo / self.relative / "mods/a.jar"
+        __import__("os").replace(target, root / "old/0")
+        __import__("os").replace(root / "new/0", target)
+        self.assertTrue(recover_transaction(self.repo))
+        self.assertEqual(target.read_text(), "initial")
+        self.assertFalse(root.exists())
+
+    def test_recovery_cleans_incomplete_initial_journal(self):
+        from mc_manager.transaction import TRANSACTION, recover_transaction
+
+        root = self.repo / TRANSACTION
+        root.mkdir()
+        (root / ".journal-incomplete").write_text("partial")
+        self.assertTrue(recover_transaction(self.repo))
+        self.assertFalse(root.exists())
 
     def test_destination_collision_and_slug(self):
         config = Config()

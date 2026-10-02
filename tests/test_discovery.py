@@ -191,6 +191,51 @@ class DiscoveryTests(unittest.TestCase):
         self.assertTrue(adapter.installed())
         self.assertEqual(adapter.scan(), [])
 
+    def test_legacy_official_config_and_isolated_subfolders(self):
+        game = self.home / "Legacy Game"
+        version(game, "1.21.1")
+        fabric = game / "home/Fabric-1.21"
+        forge = game / "home/Forge 1.12.2"
+        (fabric / "mods").mkdir(parents=True)
+        (forge / "config").mkdir(parents=True)
+        config = self.home / ".tlauncher/legacy.properties"
+        config.parent.mkdir(parents=True)
+        config.write_text(f"minecraft.gamedir={game}\n", encoding="utf-8")
+        found = SharedLauncherAdapter("legacy", self.home).scan()
+        self.assertEqual({instance.game_dir for instance in found}, {fabric, forge})
+        self.assertEqual({instance.minecraft.value for instance in found}, {"1.21", "1.12.2"})
+        self.assertEqual({instance.loader.value for instance in found}, {"fabric", "forge"})
+
+    def test_legacy_installer_config(self):
+        game = self.home / "Legacy Game"
+        version(game, "1.20.1")
+        config = self.home / ".tlauncher/legacy/Minecraft/tl.properties"
+        config.parent.mkdir(parents=True)
+        config.write_text(f"minecraft.gamedir={game}\n", encoding="utf-8")
+        found = SharedLauncherAdapter("legacy", self.home).scan()
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].game_dir, game)
+
+    def test_legacy_portable_extra_root(self):
+        game = self.home / "Portable Legacy/game"
+        (game / "home/Fabric-1.20/mods").mkdir(parents=True)
+        report = discover_report(self.home, {"legacy": [game]})
+        self.assertEqual(len(report.instances), 1)
+        self.assertEqual(report.instances[0].client, "legacy")
+        self.assertEqual(report.instances[0].game_dir, game / "home/Fabric-1.20")
+
+    def test_windows_legacy_settings_in_roaming_profile(self):
+        roaming = self.home / "AppData/Roaming"
+        game = self.home / "Windows Legacy Game"
+        version(game, "1.20.1")
+        config = roaming / ".tlauncher/legacy.properties"
+        config.parent.mkdir(parents=True)
+        config.write_text(f"minecraft.gamedir={game}\n", encoding="utf-8")
+        with patch("mc_manager.shared_launchers.sys.platform", "win32"):
+            with patch.dict("os.environ", {"APPDATA": str(roaming)}):
+                found = SharedLauncherAdapter("legacy", self.home).scan()
+        self.assertEqual([instance.game_dir for instance in found], [game])
+
     def test_generic_fingerprint_and_depth(self):
         base = self.home / ".local/share"
         game = base / "customlauncher/profiles/MyPack/game"
@@ -223,8 +268,11 @@ class DiscoveryTests(unittest.TestCase):
         root = self.home / ".local/share/custom/game"
         (root / "versions").mkdir(parents=True)
         (root / "libraries").mkdir()
-        (root / "loop").symlink_to(root, target_is_directory=True)
-        (self.home / ".local/share/alias").symlink_to(root, target_is_directory=True)
+        try:
+            (root / "loop").symlink_to(root, target_is_directory=True)
+            (self.home / ".local/share/alias").symlink_to(root, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"Symlinks are unavailable on this runner: {exc}")
         result = GenericFilesystemDiscovery(self.home).scan()
         self.assertEqual(len(result.instances), 1)
 

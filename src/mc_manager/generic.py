@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .discovery import parse_mmc_pack, parse_profile, read_json
 from .models import DetectedValue, MinecraftInstance
+from .paths import config_dir, data_dir, local_dir, minecraft_dir, roaming_dir, state_dir
 from .shared_launchers import version_from_game
 
 MAX_DEPTH = 6
@@ -103,13 +105,16 @@ def fingerprint(path: Path) -> Fingerprint:
 
 def search_roots(home: Path, extra: list[Path] | None = None) -> list[Path]:
     roots = [
-        home / ".minecraft",
+        minecraft_dir(home),
         home / ".sklauncher/instances",
-        Path(os.environ.get("XDG_DATA_HOME", home / ".local/share")),
-        Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")),
-        Path(os.environ.get("XDG_STATE_HOME", home / ".local/state")),
-        home / ".var/app",
+        data_dir(home).parent,
+        config_dir(home).parent,
+        state_dir(home).parent,
     ]
+    if sys.platform == "win32":
+        roots.extend((roaming_dir(home), local_dir(home)))
+    elif sys.platform == "linux":
+        roots.append(home / ".var/app")
     roots.extend(extra or [])
     return list(dict.fromkeys(roots))
 

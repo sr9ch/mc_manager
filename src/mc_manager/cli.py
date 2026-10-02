@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -19,15 +18,17 @@ from .git import (
     has_origin,
     pull,
     push,
+    repository_lock,
     run,
     stage,
     validate_remote_url,
     verify_repository,
 )
 from .models import MinecraftInstance, Plan
+from .paths import state_dir
 from .safety import SafetyError
 from .scan_state import report_changes
-from .sync import apply_plan, destination_for, plan_instance
+from .sync import apply_plans, destination_for, plan_instance, recover_transaction
 
 NAMES = {
     "prism": "Prism Launcher",
@@ -45,10 +46,7 @@ NAMES = {
 
 
 def state_path() -> Path:
-    return (
-        Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
-        / "mc_manager/seen.json"
-    )
+    return state_dir() / "seen.json"
 
 
 def ask(message: str, default: bool = True) -> bool:
@@ -274,6 +272,53 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+def synchronize(report: DiscoveryReport, config: Config, args: argparse.Namespace) -> int:
+    assert config.repository is not None
+    repository = config.repository
+    dry_run = args.command == "sync" and args.dry_run
+    with repository_lock(repository):
+        verify_repository(repository)
+        if recover_transaction(repository):
+            print("Recovered an interrupted synchronization.")
+        if args.command != "status" and not dry_run:
+            if dirty(repository):
+                raise GitError("Repository has uncommitted changes; sync aborted")
+            if config.git_pull and has_origin(repository):
+                pull(repository)
+        plans = make_plans(report, config, args.instance if args.command == "sync" else None)
+        show_plans(plans, verbose=args.verbose)
+        if args.command == "status" or dry_run or not any(p.changed for p in plans):
+            return 0
+        if config.ask_before_sync and not (sys.stdin.isatty() and ask("Synchronize changes?")):
+            print("Synchronization skipped")
+            return 0
+        if config.git_commit:
+            ensure_commit_identity(repository)
+        # Persist stable destinations before the repository changes.
+        save(config)
+        changed_paths = apply_plans(plans, repository)
+        for plan in plans:
+            if plan.changed:
+                print(f"✓ {plan.instance.name}")
+        print("Synchronization complete.")
+        if (
+            config.git_commit
+            and changed_paths
+            and (not sys.stdin.isatty() or ask("Create Git commit?"))
+        ):
+            if stage(repository, changed_paths):
+                commit(repository, f"mc_manager: sync {sum(p.changed for p in plans)} instance(s)")
+                print("Git commit created.")
+                if (
+                    has_origin(repository)
+                    and sys.stdin.isatty()
+                    and ask("Push to origin?", config.git_push)
+                ):
+                    push(repository)
+                    print("Pushed to origin.")
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     logging.basicConfig(
@@ -324,48 +369,7 @@ def main(argv: list[str] | None = None) -> int:
                     return 0
             else:
                 raise GitError("Repository is not configured. Run mc_manager config --setup.")
-        dry_run = args.command == "sync" and args.dry_run
-        if args.command != "status" and not dry_run:
-            verify_repository(config.repository)
-            if dirty(config.repository):
-                raise GitError("Repository has uncommitted changes; sync aborted")
-            if config.git_pull and has_origin(config.repository):
-                pull(config.repository)
-        plans = make_plans(report, config, args.instance if args.command == "sync" else None)
-        show_plans(plans, verbose=args.verbose)
-        if args.command == "status" or dry_run or not any(p.changed for p in plans):
-            return 0
-        if config.ask_before_sync and not (sys.stdin.isatty() and ask("Synchronize changes?")):
-            print("Synchronization skipped")
-            return 0
-        if config.git_commit:
-            ensure_commit_identity(config.repository)
-        changed_paths: list[Path] = []
-        for plan in plans:
-            if plan.changed:
-                changed_paths.extend(apply_plan(plan, config.repository))
-                print(f"✓ {plan.instance.name}")
-        print("Synchronization complete.")
-        save(config)
-        if (
-            config.git_commit
-            and changed_paths
-            and (not sys.stdin.isatty() or ask("Create Git commit?"))
-        ):
-            if stage(config.repository, changed_paths):
-                commit(
-                    config.repository,
-                    f"mc_manager: sync {len([p for p in plans if p.changed])} instance(s)",
-                )
-                print("Git commit created.")
-                if (
-                    has_origin(config.repository)
-                    and sys.stdin.isatty()
-                    and ask("Push to origin?", config.git_push)
-                ):
-                    push(config.repository)
-                    print("Pushed to origin.")
-        return 0
+        return synchronize(report, config, args)
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         return 130

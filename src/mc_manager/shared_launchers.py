@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import os
+import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from .discovery import detected, parse_version_metadata, read_json
 from .models import DetectedValue, MinecraftInstance
+from .paths import config_dir, data_dir, minecraft_dir, roaming_dir
+from .safety import CONTENT_DIRS
 
 
 def properties(path: Path) -> dict[str, str]:
-    if not path.is_file() or path.is_symlink() or path.stat().st_size > 1024 * 1024:
+    try:
+        if not path.is_file() or path.is_symlink() or path.stat().st_size > 1024 * 1024:
+            return {}
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
         return {}
     values = {}
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in lines:
         line = line.strip()
         if not line or line.startswith(("#", "!")):
             continue
@@ -37,7 +45,14 @@ GAME_KEYS = (
     "gamedir",
     "directory",
 )
-VERSION_KEYS = ("selectedversion", "minecraft.version", "version", "login.version", "lastversion")
+VERSION_KEYS = (
+    "selectedversion",
+    "minecraft.version",
+    "version",
+    "login.version",
+    "login.version.game",
+    "lastversion",
+)
 
 
 def configured_directory(values: dict[str, str], fallback: Path) -> Path:
@@ -62,7 +77,11 @@ def version_from_game(
                 return result
         return DetectedValue(), DetectedValue(), DetectedValue()
     candidates = []
-    for folder in versions.iterdir():
+    try:
+        folders = list(versions.iterdir())
+    except OSError:
+        return DetectedValue(), DetectedValue(), DetectedValue()
+    for folder in folders:
         if folder.is_symlink() or not folder.is_dir():
             continue
         result = parse_version_metadata(folder / f"{folder.name}.json")
@@ -90,47 +109,114 @@ def valid_game(root: Path) -> bool:
     )
 
 
+def legacy_subfolders(root: Path) -> list[MinecraftInstance]:
+    """Legacy Launcher keeps isolated game content under game-directory/home/."""
+    parent = root / "home"
+    if parent.is_symlink() or not parent.is_dir():
+        return []
+    instances = []
+    try:
+        children = sorted(parent.iterdir())
+    except OSError:
+        return []
+    for child in children:
+        if not valid_game(child):
+            continue
+        match = re.search(r"(?<!\d)(1\.\d+(?:\.\d+)?)(?!\d)", child.name)
+        minecraft = (
+            DetectedValue(match.group(), "inferred", "Legacy subfolder name")
+            if match
+            else DetectedValue()
+        )
+        loader_name = next(
+            (
+                name
+                for name in ("neoforge", "forge", "fabric", "quilt")
+                if name in child.name.lower()
+            ),
+            "vanilla" if match else None,
+        )
+        loader = (
+            DetectedValue(loader_name, "inferred", "Legacy subfolder name")
+            if loader_name
+            else DetectedValue()
+        )
+        instances.append(MinecraftInstance("legacy", child.name, child, child, minecraft, loader))
+    return instances
+
+
 @dataclass
 class SharedLauncherAdapter:
     client: str
     home: Path
+    extra_roots: tuple[Path, ...] = ()
 
     def config_files(self) -> list[Path]:
-        data = Path(os.environ.get("XDG_DATA_HOME", self.home / ".local/share"))
-        cfg = Path(os.environ.get("XDG_CONFIG_HOME", self.home / ".config"))
+        data = data_dir(self.home).parent
+        cfg = config_dir(self.home).parent
+        windows_tlauncher = roaming_dir(self.home) / ".tlauncher"
         if self.client == "legacy":
-            return [
+            files = [
+                self.home / ".tlauncher/legacy.properties",
+                self.home / ".tlauncher/legacy/Minecraft/tl.properties",
                 self.home / ".launcher/legacy.properties",
                 cfg / "legacylauncher/legacy.properties",
                 data / "LegacyLauncher/launcher/config/legacy.properties",
             ]
+            if sys.platform == "win32":
+                files.extend(
+                    (
+                        windows_tlauncher / "legacy.properties",
+                        windows_tlauncher / "legacy/Minecraft/tl.properties",
+                    )
+                )
+            return files
         if self.client == "tlauncher":
-            return [
+            files = [
                 self.home / ".tlauncher/tlauncher-2.0.properties",
                 self.home / ".tlauncher/tlauncher.properties",
             ]
+            if sys.platform == "win32":
+                files.extend(
+                    (
+                        windows_tlauncher / "tlauncher-2.0.properties",
+                        windows_tlauncher / "tlauncher.properties",
+                    )
+                )
+            return files
         if self.client == "sklauncher":
-            return [
+            files = [
                 self.home / ".sklauncher/instances.json",
-                self.home / ".minecraft/sklauncher/installations.json",
-                self.home / ".minecraft/sklauncher/profiles.json",
+                minecraft_dir(self.home) / "sklauncher/installations.json",
+                minecraft_dir(self.home) / "sklauncher/profiles.json",
                 cfg / "sklauncher/installations.json",
             ]
+            if sys.platform == "win32":
+                files.append(roaming_dir(self.home) / ".sklauncher/instances.json")
+            return files
         return []
 
     def installed(self) -> bool:
-        return any(p.is_file() and not p.is_symlink() for p in self.config_files()) or (
-            self.client == "sklauncher"
-            and (
-                (self.home / ".minecraft/sklauncher").is_dir()
-                or (self.home / ".sklauncher").is_dir()
+        return (
+            any(p.is_file() and not p.is_symlink() for p in self.config_files())
+            or any(valid_game(root) for root in self.extra_roots)
+            or (
+                self.client == "legacy"
+                and any(legacy_subfolders(root) for root in self.extra_roots)
+            )
+            or (
+                self.client == "sklauncher"
+                and (
+                    (minecraft_dir(self.home) / "sklauncher").is_dir()
+                    or (self.home / ".sklauncher").is_dir()
+                )
             )
         )
 
     def scan(self) -> list[MinecraftInstance]:
         if not self.installed():
             return []
-        fallback = self.home / ".minecraft"
+        fallback = minecraft_dir(self.home)
         results = []
         explicit_directory = False
         for config in self.config_files():
@@ -140,7 +226,13 @@ class SharedLauncherAdapter:
                 values = properties(config)
                 root = configured_directory(values, fallback)
                 explicit_directory = explicit_directory or root != fallback
+                subfolders = []
+                if self.client == "legacy":
+                    subfolders = legacy_subfolders(root)
+                    results.extend(subfolders)
                 if not valid_game(root):
+                    continue
+                if subfolders and not any((root / name).is_dir() for name in CONTENT_DIRS):
                     continue
                 selected = next((values[k] for k in VERSION_KEYS if values.get(k)), None)
                 mc, loader, lv = version_from_game(root, selected)
@@ -211,9 +303,24 @@ class SharedLauncherAdapter:
                     results.append(
                         MinecraftInstance(self.client, "Minecraft", root, root, mc, loader, lv)
                     )
+        for root in self.extra_roots:
+            subfolders = []
+            if self.client == "legacy":
+                subfolders = legacy_subfolders(root)
+                results.extend(subfolders)
+            if valid_game(root) and (
+                not subfolders or any((root / name).is_dir() for name in CONTENT_DIRS)
+            ):
+                mc, loader, lv = version_from_game(root)
+                results.append(
+                    MinecraftInstance(self.client, root.name, root, root, mc, loader, lv)
+                )
         if not results and not explicit_directory and valid_game(fallback):
             mc, loader, lv = version_from_game(fallback)
             results.append(
                 MinecraftInstance(self.client, "Minecraft", fallback, fallback, mc, loader, lv)
             )
-        return results
+        unique: dict[Path, MinecraftInstance] = {}
+        for instance in results:
+            unique.setdefault(instance.game_dir.resolve(), instance)
+        return list(unique.values())

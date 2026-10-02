@@ -1,44 +1,123 @@
 # mc_manager
 
 Find local Minecraft installations, see what changed, and save selected modpack files
-to Git. Designed for Fedora Linux and XDG directories. Runs on Python 3.11+ with no
-third-party runtime dependencies.
+to Git. Works on Linux, Windows and macOS with Python 3.11+ and Git. No third-party
+runtime packages are required.
 
-## Quick start
+## Installation and first launch
 
-From a checkout of this project:
+There are **two different repositories**: the `mc_manager` source code and a separate
+Git repository for Minecraft builds. The source checkout in this workspace has no
+configured remote, so replace `SOURCE_REPOSITORY_URL` below with the actual source
+URL when installing on another computer. If you already have the `mc_manager` folder,
+start at `cd mc_manager`. The commands use a virtual environment inside the source
+folder; they do not change the system Python installation.
 
-```bash
-pipx install .
-mc_manager
-```
+### Linux
 
-Run `mc_manager` from any terminal whenever you want to check your installations.
-Every launch scans local launchers and game directories, then compares them with the
-previous scan. It reports new or missing launchers and instances, changed Minecraft
-or loader versions, and added, edited, or removed modpack files. The first scan saves
-a baseline and offers Git setup when run interactively. Press Enter to continue
-without a repository; connect one only if you want to synchronize selected content.
-This checks versions installed on your computer, not new Minecraft releases on the
-internet.
+1. Install Python 3.11 or newer and Git. For Fedora:
 
-To connect a repository, run `mc_manager config --setup`. For a remote URL,
-`mc_manager` clones a local copy under your XDG data directory unless you choose
-another location. The wizard lists discovered installations and lets you exclude
-clients or individual game directories. Once configured, `mc_manager` also shows
-pending repository changes and asks before synchronizing.
+   ```bash
+   sudo dnf install python3 python3-pip git
+   python3 --version
+   git --version
+   ```
 
-For a development checkout:
+   On Debian/Ubuntu, use `sudo apt install python3 python3-venv python3-pip git`.
+   Check that `python3 --version` prints 3.11 or newer.
+2. Clone and install `mc_manager`:
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-mc_manager scan
-```
+   ```bash
+   git clone "SOURCE_REPOSITORY_URL" mc_manager
+   cd mc_manager
+   python3 -m venv .venv
+   .venv/bin/python -m pip install .
+   .venv/bin/mc_manager scan
+   ```
 
-No repository URL is embedded in this project. To install from a remote source, clone
-its actual URL first, change into the checkout, then run `pipx install .`.
+3. Set your Git author identity and connect the Minecraft builds repository:
+
+   ```bash
+   git config --global user.name "Your Name"
+   git config --global user.email "you@example.com"
+   .venv/bin/mc_manager config --setup
+   ```
+
+   At the repository prompt, paste `https://github.com/sr9ch/mc_versions.git` (or
+   your own Git URL). Press Enter to use the default local clone, then press Enter at
+   both exclusion prompts to include every detected build and launcher. To review and
+   sync, run `.venv/bin/mc_manager sync --dry-run` and then `.venv/bin/mc_manager`.
+   For later launches from another directory, use the absolute path to
+   `mc_manager/.venv/bin/mc_manager`.
+
+### Windows (PowerShell)
+
+1. Install [Python 3.11+](https://www.python.org/downloads/windows/) with the Python
+   launcher (`py`) and [Git for Windows](https://git-scm.com/download/win). Open a new
+   PowerShell window and check `py -3 --version` and `git --version`.
+2. Clone and install `mc_manager`:
+
+   ```powershell
+   git clone "SOURCE_REPOSITORY_URL" mc_manager
+   cd mc_manager
+   py -3 -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install .
+   .\.venv\Scripts\mc_manager.exe scan
+   ```
+
+3. Set your Git identity and connect the Minecraft builds repository:
+
+   ```powershell
+   git config --global user.name "Your Name"
+   git config --global user.email "you@example.com"
+   .\.venv\Scripts\mc_manager.exe config --setup
+   ```
+
+   Paste `https://github.com/sr9ch/mc_versions.git` (or your own Git URL) at the
+   repository prompt. Press Enter for the default clone under `%LOCALAPPDATA%`, then
+   press Enter at both exclusion prompts. Check with
+   `.\.venv\Scripts\mc_manager.exe sync --dry-run`; run
+   `.\.venv\Scripts\mc_manager.exe` to synchronize. Use the full path to that `.exe`
+   for later launches from another folder. Activation is optional, so PowerShell's
+   script execution policy does not need to change.
+
+### macOS (Terminal)
+
+1. Install Python 3.11 or newer and Git. Check `python3 --version` and
+   `git --version`; install Python from [python.org](https://www.python.org/downloads/macos/)
+   if the available Python is older than 3.11. Install the Xcode Command Line Tools
+   (`xcode-select --install`) if Git is missing.
+2. Clone and install `mc_manager`:
+
+   ```bash
+   git clone "SOURCE_REPOSITORY_URL" mc_manager
+   cd mc_manager
+   python3 -m venv .venv
+   .venv/bin/python -m pip install .
+   .venv/bin/mc_manager scan
+   ```
+
+3. Set your Git identity and connect the Minecraft builds repository:
+
+   ```bash
+   git config --global user.name "Your Name"
+   git config --global user.email "you@example.com"
+   .venv/bin/mc_manager config --setup
+   ```
+
+   Paste `https://github.com/sr9ch/mc_versions.git` (or your own Git URL), press
+   Enter for the default clone under `~/Library/Application Support/mc_manager`, and
+   press Enter at both exclusion prompts. Run `.venv/bin/mc_manager sync --dry-run`,
+   then `.venv/bin/mc_manager`. Use the absolute path to the executable for later
+   launches from another folder.
+
+Every `mc_manager` launch scans installed launchers and game directories, comparing
+new or missing instances, installed Minecraft and loader versions, and modpack files
+with the previous scan. It checks **local installations**, not new Minecraft releases
+on the internet. A first scan saves a baseline; you can run scans without any Git
+repository. `config --setup` connects a repository when you are ready.
+In the remaining examples, `mc_manager` means the executable inside `.venv` shown
+above, unless you have activated the virtual environment or installed it with pipx.
 
 ## Choose a repository
 
@@ -51,6 +130,8 @@ Two setup options are supported:
 
 1. **Existing local working tree.** Create one if needed:
 
+   Linux/macOS:
+
    ```bash
    mkdir -p ~/minecraft-configs
    git -C ~/minecraft-configs init
@@ -59,7 +140,19 @@ Two setup options are supported:
    mc_manager config --setup
    ```
 
-   At the repository prompt enter `~/minecraft-configs`. The path must be the Git
+   Windows PowerShell:
+
+   ```powershell
+   New-Item -ItemType Directory -Force "$env:USERPROFILE\minecraft-configs" | Out-Null
+   git -C "$env:USERPROFILE\minecraft-configs" init
+   git -C "$env:USERPROFILE\minecraft-configs" config user.name "Your Name"
+   git -C "$env:USERPROFILE\minecraft-configs" config user.email "you@example.com"
+   .\.venv\Scripts\mc_manager.exe config --setup
+   ```
+
+   At the repository prompt enter `~/minecraft-configs` on Linux/macOS, or the
+   expanded absolute path on Windows (for example, `C:/Users/Alex/minecraft-configs`).
+   The path must be the Git
    repository root, not a subdirectory or bare repository. It must be separate from
    every Minecraft game directory. `mc_manager` accepts `~` or an absolute path;
    a relative path is interpreted from the shell's current directory.
@@ -74,16 +167,17 @@ Two setup options are supported:
    ```
 
    The names above are placeholders. The same URL forms work with other Git servers.
-   Press Enter for the default local clone at
-   `$XDG_DATA_HOME/mc_manager/repository` (usually
-   `~/.local/share/mc_manager/repository`), or enter another unused local path.
+   Press Enter for the default local clone (Linux:
+   `~/.local/share/mc_manager/repository`; Windows:
+   `%LOCALAPPDATA%\mc_manager\repository`; macOS:
+   `~/Library/Application Support/mc_manager/repository`), or enter another unused
+   local path.
    SSH authentication or a Git credential helper must already work. Passwords,
    tokens, URL queries, `http://`, and `file://` clone URLs are not accepted.
 
 At the exclusion prompts, press Enter to include all detected instances and launchers.
 Before the first synchronization, configure `user.name` and `user.email` in the chosen
-local repository. For a direct remote clone at the default path, decline the first
-sync prompt and run:
+local repository. For a direct remote clone at the default Linux path, run:
 
 ```bash
 git -C ~/.local/share/mc_manager/repository config user.name "Your Name"
@@ -105,6 +199,10 @@ mc_manager
 The final command shows changes and asks before copying. After copying it offers a
 Git commit and, when `origin` exists, a push. A local-only repository has no push
 target until you add a remote.
+
+If the Git URL requires sign-in, configure your Git credential helper or SSH key
+first. GitHub account passwords are not accepted in HTTPS URLs; use a supported
+credential flow. The wizard rejects credentials embedded in a URL.
 
 ## What it does
 
@@ -129,7 +227,7 @@ Example output from a scan:
 
 ```text
 $ mc_manager scan
-Minecraft Manager 0.2.3
+Minecraft Manager 0.3.0
 Scanning local installations...
 
 2 launchers detected; 2 unique installations
@@ -164,8 +262,8 @@ flowchart LR
   F --> G[Git repository]
 ```
 
-The generic scanner checks `~/.minecraft`, `~/.sklauncher/instances`, XDG config,
-data and state directories, Flatpak application data, and known adapter roots. It
+The generic scanner checks the platform's Minecraft, application configuration and
+data directories, plus known launcher roots (including Flatpak on Linux). It
 visits at most 4,000 directories and descends at most six levels from each search
 root. Large unrelated trees, caches and symlinks are skipped. A candidate needs
 several Minecraft indicators: `versions`, `libraries`, `assets`, launcher profiles,
@@ -179,7 +277,7 @@ scan; no discovery cache currently exists.
 | Prism Launcher | `instances/*/mmc-pack.json` and `instance.cfg` | Component versions | Supported |
 | MultiMC | Same MMC layout | Component versions | Supported for standard layout |
 | SKLauncher | `~/.sklauncher/instances.json`, installations metadata | Version JSON and installation fields | 4.0 layout tested; older layouts experimental |
-| Legacy Launcher | `legacy.properties` and game `versions` | Selected version JSON | Experimental; subfolder modes may need manual roots |
+| Legacy Launcher | `.tlauncher/legacy.properties`, installer `tl.properties`, game `versions`, and `home/*` | Selected version JSON or inferred subfolder name | Supported for standard and subfolder layouts; portable custom paths need a configured root |
 | TLauncher | `tlauncher-2.0.properties` and game `versions` | Selected version JSON | Experimental |
 | Minecraft Launcher | `launcher_profiles.json` and `versions` | Profile and version JSON | Supported for profile layout |
 | Modrinth App, ATLauncher, CurseForge, GDLauncher | Known instance manifests | Available fields | Experimental; schemas vary by release |
@@ -189,6 +287,21 @@ When a shared game root contains several installed versions and no reliable sele
 version is available, `mc_manager` reports the version as unknown rather than claiming
 each version is a separate instance. SKLauncher 4.0's separate `directory` values are
 independent instances; unplayed empty entries are not synchronized.
+
+### Legacy Launcher
+
+For [Legacy Launcher](https://legacylauncher.ru), run `mc_manager scan --debug` after
+installing and launching a game version once. The adapter reads the usual
+`.tlauncher/legacy.properties` settings (or installer `tl.properties`) and the selected
+game folder. Legacy's [Subfolders feature](https://legacylauncher-docs.pages.dev/en/launcher/subfolders)
+stores separate builds in `game-directory/home/<family-or-version>`; `mc_manager`
+detects these as separate instances. Folder names supply inferred version and loader
+values when no version JSON is available. If you use a portable launcher or a
+nonstandard settings path, open its game folder from Legacy's folder icon and add
+its absolute path to `[roots]` as `legacy = ["/path/to/game-directory"]` in the
+`mc_manager` config file. On Windows, use forward slashes or escaped backslashes in
+TOML paths, for example `legacy = ["C:/Games/Minecraft"]`. Run `mc_manager scan`
+again, then `mc_manager sync --dry-run` to review the build paths.
 
 ## Commands
 
@@ -209,8 +322,9 @@ Large change plans show totals by change type and directory, followed by the fir
 to see every path and more discovery details. The global `--verbose` flag goes before
 the command.
 
-`status`, `scan`, and `sync --dry-run` never copy or delete Minecraft content. A
-noninteractive invocation with `ask_before_sync = true` prints the plan and skips
+`scan` never writes repository content. `status` and `sync --dry-run` only inspect
+content, except that an interrupted prior sync is rolled back before inspection.
+A noninteractive invocation with `ask_before_sync = true` prints the plan and skips
 sync. Set it to `false` only if unattended synchronization is intended.
 
 ## Repository layout and configuration
@@ -234,10 +348,16 @@ minecraft/
 time, and SHA-256 hashes of managed files. It contains no absolute machine paths.
 World slugs include a short hash to prevent collisions between similar names.
 
-Configuration is human-readable TOML at `$XDG_CONFIG_HOME/mc_manager/config.toml`,
-or `~/.config/mc_manager/config.toml`. Scan history is stored in
-`$XDG_STATE_HOME/mc_manager/seen.json` with owner-only permissions. A remote clone defaults to
-`$XDG_DATA_HOME/mc_manager/repository`.
+Configuration is human-readable TOML. Default locations:
+
+| OS | Config | Scan history | Remote clone |
+| --- | --- | --- | --- |
+| Linux | `~/.config/mc_manager/config.toml` | `~/.local/state/mc_manager/seen.json` | `~/.local/share/mc_manager/repository` |
+| Windows | `%APPDATA%\mc_manager\config.toml` | `%LOCALAPPDATA%\mc_manager\seen.json` | `%LOCALAPPDATA%\mc_manager\repository` |
+| macOS | `~/Library/Application Support/mc_manager/config.toml` | `~/Library/Application Support/mc_manager/seen.json` | `~/Library/Application Support/mc_manager/repository` |
+
+The `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, and `XDG_DATA_HOME` environment variables
+override those defaults on any platform.
 
 ```toml
 [repository]
@@ -270,14 +390,17 @@ common credential keys are skipped. Eligible symlinked content blocks synchroniz
 repository deletions are restricted to manifest-owned files whose
 hash still matches. Existing unmanaged files block a collision. A dirty Git repository
 blocks sync, and pull uses `--ff-only` when enabled. No Minecraft files are modified.
+Repository writes are staged together; an interrupted synchronization is rolled
+back before the next repository operation. A lock prevents simultaneous
+`mc_manager` operations on the same repository.
 
 The content scanner hashes eligible files for an accurate change plan; a very large
 modpack may take time to scan. Files larger than 100 MiB and text-like files larger
 than 4 MiB are skipped. Secret detection is intentionally conservative but cannot
 prove an arbitrary mod configuration contains no private information; review the
 planned changes and Git diff before publishing a repository. Alternate launcher
-schemas and Legacy Launcher subfolder modes may require explicit roots or future
-adapter updates. Generic discovery is bounded, so directories beyond its depth or
+schemas and portable installations may require explicit roots or adapter updates.
+Generic discovery is bounded, so directories beyond its depth or
 visit limit need a configured root or launcher adapter.
 
 ## Development
@@ -285,8 +408,10 @@ visit limit need a configured root or launcher adapter.
 Core modules are under `src/mc_manager/`: `discovery.py` and
 `shared_launchers.py` hold adapters and metadata readers; `generic.py` supplies
 bounded filesystem discovery; `sync.py` plans and applies content changes;
-`safety.py` guards paths and filters files; `git.py` handles Git; `config.py` stores
-XDG settings; `cli.py` provides the terminal workflow. Fixture-based tests live in
+`safety.py` guards paths and filters files; `transaction.py` applies recoverable
+repository writes; `git.py` handles Git and locking; `paths.py` selects platform
+locations; `config.py` stores settings; `cli.py` provides the terminal workflow.
+Fixture-based tests live in
 `tests/`.
 
 ```bash

@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .paths import config_dir, data_dir
+
 
 def config_path() -> Path:
-    return (
-        Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "mc_manager/config.toml"
-    )
+    return config_dir() / "config.toml"
 
 
 def data_path() -> Path:
-    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "mc_manager"
+    return data_dir()
 
 
 @dataclass
@@ -114,7 +115,14 @@ def save(config: Config, path: Path | None = None) -> None:
     )
     lines.extend(["", "[destinations]"])
     lines.extend(f"{q(k)} = {q(v)}" for k, v in sorted(config.destinations.items()))
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    os.chmod(tmp, 0o600)
-    tmp.replace(path)
+    descriptor, temporary = tempfile.mkstemp(prefix=".config-", suffix=".toml", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write("\n".join(lines) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)

@@ -3,7 +3,6 @@ from __future__ import annotations
 import configparser
 import json
 import logging
-import os
 import re
 import sys
 from collections.abc import Iterable
@@ -11,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .models import DetectedValue, MinecraftInstance
+from .paths import data_dir, local_dir, minecraft_dir, roaming_dir
 
 LOG = logging.getLogger(__name__)
 
@@ -146,7 +146,35 @@ def parse_profile(data: dict) -> tuple[DetectedValue, DetectedValue, DetectedVal
 
 
 def candidate_roots(home: Path, client: str) -> list[Path]:
-    data = Path(os.environ.get("XDG_DATA_HOME", home / ".local/share"))
+    data = data_dir(home).parent
+    if sys.platform == "win32":
+        roaming = roaming_dir(home)
+        local = local_dir(home)
+        roots = {
+            "prism": [roaming / "PrismLauncher/instances", local / "PrismLauncher/instances"],
+            "multimc": [home / "MultiMC/instances", roaming / "MultiMC/instances"],
+            "modrinth": [roaming / "ModrinthApp/profiles", local / "ModrinthApp/profiles"],
+            "atlauncher": [home / "ATLauncher/instances", roaming / "ATLauncher/instances"],
+            "curseforge": [
+                home / "curseforge/minecraft/Instances",
+                home / "Documents/CurseForge/Minecraft/Instances",
+            ],
+            "gdlauncher": [
+                roaming / "gdlauncher_next/instances",
+                local / "gdlauncher_next/instances",
+            ],
+        }
+        return roots.get(client, [])
+    if sys.platform == "darwin":
+        roots = {
+            "prism": [data / "PrismLauncher/instances", home / "PrismLauncher/instances"],
+            "multimc": [home / "MultiMC/instances", data / "MultiMC/instances"],
+            "modrinth": [data / "ModrinthApp/profiles"],
+            "atlauncher": [home / "ATLauncher/instances", data / "ATLauncher/instances"],
+            "curseforge": [home / "Documents/CurseForge/Minecraft/Instances"],
+            "gdlauncher": [data / "gdlauncher_next/instances"],
+        }
+        return roots.get(client, [])
     if client == "prism":
         return [
             data / "PrismLauncher/instances",
@@ -204,7 +232,12 @@ class DirectoryAdapter:
     def installed(self) -> bool:
         if any(root.is_dir() and not root.is_symlink() for root in self.roots):
             return True
-        return self.client == "prism" and (self.roots[1].parents[2]).is_dir()
+        return (
+            sys.platform == "linux"
+            and self.client == "prism"
+            and len(self.roots) > 1
+            and (self.roots[1].parents[2]).is_dir()
+        )
 
     def parse(self, root: Path) -> MinecraftInstance | None:
         client = self.client
@@ -263,11 +296,7 @@ class VanillaAdapter:
         self.home = home
 
     def scan(self) -> list[MinecraftInstance]:
-        roots = [self.home / ".minecraft"]
-        if sys.platform == "darwin":
-            roots.append(self.home / "Library/Application Support/minecraft")
-        if os.name == "nt":
-            roots.append(Path(os.environ.get("APPDATA", self.home)) / ".minecraft")
+        roots = list(dict.fromkeys((minecraft_dir(self.home), self.home / ".minecraft")))
         found = []
         for root in roots:
             if root.is_symlink() or not root.is_dir():
@@ -337,7 +366,8 @@ def discover_report(
     ]
     adapters.append(VanillaAdapter(home))
     adapters.extend(
-        SharedLauncherAdapter(name, home) for name in ("legacy", "tlauncher", "sklauncher")
+        SharedLauncherAdapter(name, home, tuple(extra_roots.get(name, [])))
+        for name in ("legacy", "tlauncher", "sklauncher")
     )
     extra = [root for values in extra_roots.values() for root in values]
     extra.extend(

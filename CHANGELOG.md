@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-10-02
+
+### Added
+
+- Windows and macOS configuration, data, Minecraft, and launcher search paths.
+- Legacy Launcher settings detection and separate game folders under `home/`.
+- Cross-platform repository lock and recoverable multi-instance synchronization.
+- Separate Linux, Windows, and macOS setup instructions.
+
+### Fixed
+
+- Keep scan history on unreadable content or a corrupt state file.
+- Save destination mappings before repository writes and stop on source scan errors.
+
 ## 0.2.3 — 2026-10-02
 
 ### Fixed
