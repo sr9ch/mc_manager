@@ -12,7 +12,7 @@ from mc_manager.discovery import (
     parse_version_metadata,
 )
 from mc_manager.generic import GenericFilesystemDiscovery, fingerprint
-from mc_manager.shared_launchers import SharedLauncherAdapter, version_from_game
+from mc_manager.shared_launchers import SharedLauncherAdapter, properties, version_from_game
 
 
 def put(path: Path, data: dict):
@@ -152,6 +152,8 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_inferred_loader_version_strips_game_version(self):
         self.assertEqual(parse_version_id("fabric-loader-0.16.10-1.21.1")[2].value, "0.16.10")
+        self.assertEqual(parse_version_id("fabric-loader-0.17.0-26.3")[0].value, "26.3")
+        self.assertEqual(parse_version_id("fabric-loader-0.17.0-26.3")[2].value, "0.17.0")
 
     def test_version_metadata_loaders_and_vanilla(self):
         cases = [
@@ -216,6 +218,26 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0].game_dir, game)
 
+    def test_legacy_subfolder_reads_version_json_before_folder_name(self):
+        game = self.home / "Legacy Game"
+        subfolder = game / "home/My Pack"
+        put(subfolder / "versions/26.3/26.3.json", {"id": "26.3"})
+        (subfolder / "mods").mkdir()
+        config = self.home / ".tlauncher/legacy.properties"
+        config.parent.mkdir(parents=True)
+        config.write_text(f"minecraft.gamedir={game}\n", encoding="utf-8")
+        found = SharedLauncherAdapter("legacy", self.home).scan()
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].minecraft.value, "26.3")
+        self.assertEqual(found[0].game_dir, subfolder)
+
+    def test_legacy_java_properties_unescape_windows_path(self):
+        config = self.home / "legacy.properties"
+        config.write_text(
+            r"minecraft.gamedir=C\:\\Users\\Player\\Minecraft" + "\n", encoding="utf-8"
+        )
+        self.assertEqual(properties(config)["minecraft.gamedir"], r"C:\Users\Player\Minecraft")
+
     def test_legacy_portable_extra_root(self):
         game = self.home / "Portable Legacy/game"
         (game / "home/Fabric-1.20/mods").mkdir(parents=True)
@@ -230,11 +252,30 @@ class DiscoveryTests(unittest.TestCase):
         version(game, "1.20.1")
         config = roaming / ".tlauncher/legacy.properties"
         config.parent.mkdir(parents=True)
-        config.write_text(f"minecraft.gamedir={game}\n", encoding="utf-8")
+        escaped_game = str(game).replace("\\", "\\\\").replace(":", "\\:")
+        config.write_text(f"minecraft.gamedir={escaped_game}\n", encoding="utf-8")
         with patch("mc_manager.shared_launchers.sys.platform", "win32"):
             with patch.dict("os.environ", {"APPDATA": str(roaming)}):
                 found = SharedLauncherAdapter("legacy", self.home).scan()
         self.assertEqual([instance.game_dir for instance in found], [game])
+
+    def test_windows_legacy_selected_year_version_with_escaped_game_path(self):
+        roaming = self.home / "AppData/Roaming"
+        game = self.home / "Windows Legacy Game"
+        put(game / "versions/26.3/26.3.json", {"id": "26.3"})
+        config = roaming / ".tlauncher/legacy.properties"
+        config.parent.mkdir(parents=True)
+        escaped_game = str(game).replace("\\", "\\\\").replace(":", "\\:").replace(" ", r"\ ")
+        config.write_text(
+            f"minecraft.gamedir={escaped_game}\nversion=2.0\nlogin.version=26.3\n",
+            encoding="utf-8",
+        )
+        with patch("mc_manager.shared_launchers.sys.platform", "win32"):
+            with patch.dict("os.environ", {"APPDATA": str(roaming)}):
+                found = SharedLauncherAdapter("legacy", self.home).scan()
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].minecraft.value, "26.3")
+        self.assertEqual(found[0].game_dir, game)
 
     def test_generic_fingerprint_and_depth(self):
         base = self.home / ".local/share"

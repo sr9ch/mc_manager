@@ -3,15 +3,36 @@
 from __future__ import annotations
 
 import os
-import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from .discovery import detected, parse_version_metadata, read_json
+from .discovery import MC_RE, detected, parse_version_metadata, read_json
 from .models import DetectedValue, MinecraftInstance
 from .paths import config_dir, data_dir, minecraft_dir, roaming_dir
 from .safety import CONTENT_DIRS
+
+
+def _unescape_property(value: str) -> str:
+    """Decode escapes written by Java Properties.store, including Windows paths."""
+    result = []
+    index = 0
+    escapes = {"t": "\t", "r": "\r", "n": "\n", "f": "\f"}
+    while index < len(value):
+        if value[index] != "\\" or index + 1 == len(value):
+            result.append(value[index])
+            index += 1
+            continue
+        next_char = value[index + 1]
+        if next_char == "u" and index + 5 < len(value):
+            digits = value[index + 2 : index + 6]
+            if all(char in "0123456789abcdefABCDEF" for char in digits):
+                result.append(chr(int(digits, 16)))
+                index += 6
+                continue
+        result.append(escapes.get(next_char, next_char))
+        index += 2
+    return "".join(result)
 
 
 def properties(path: Path) -> dict[str, str]:
@@ -32,7 +53,7 @@ def properties(path: Path) -> dict[str, str]:
             key, value = line.split(":", 1)
         else:
             continue
-        values[key.strip().lower()] = value.strip()
+        values[_unescape_property(key.strip()).lower()] = _unescape_property(value.strip())
     return values
 
 
@@ -46,12 +67,12 @@ GAME_KEYS = (
     "directory",
 )
 VERSION_KEYS = (
-    "selectedversion",
-    "minecraft.version",
-    "version",
     "login.version",
     "login.version.game",
+    "selectedversion",
+    "minecraft.version",
     "lastversion",
+    "version",
 )
 
 
@@ -122,12 +143,10 @@ def legacy_subfolders(root: Path) -> list[MinecraftInstance]:
     for child in children:
         if not valid_game(child):
             continue
-        match = re.search(r"(?<!\d)(1\.\d+(?:\.\d+)?)(?!\d)", child.name)
-        minecraft = (
-            DetectedValue(match.group(), "inferred", "Legacy subfolder name")
-            if match
-            else DetectedValue()
-        )
+        minecraft, loader, loader_version = version_from_game(child)
+        match = MC_RE.search(child.name)
+        if not minecraft.value and match:
+            minecraft = DetectedValue(match.group(), "inferred", "Legacy subfolder name")
         loader_name = next(
             (
                 name
@@ -136,12 +155,11 @@ def legacy_subfolders(root: Path) -> list[MinecraftInstance]:
             ),
             "vanilla" if match else None,
         )
-        loader = (
-            DetectedValue(loader_name, "inferred", "Legacy subfolder name")
-            if loader_name
-            else DetectedValue()
+        if not loader.value and loader_name:
+            loader = DetectedValue(loader_name, "inferred", "Legacy subfolder name")
+        instances.append(
+            MinecraftInstance("legacy", child.name, child, child, minecraft, loader, loader_version)
         )
-        instances.append(MinecraftInstance("legacy", child.name, child, child, minecraft, loader))
     return instances
 
 

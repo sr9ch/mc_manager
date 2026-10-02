@@ -81,6 +81,14 @@ folder; they do not change the system Python installation.
    for later launches from another folder. Activation is optional, so PowerShell's
    script execution policy does not need to change.
 
+   To install updates in an existing clone, run from the `mc_manager` folder:
+
+   ```powershell
+   git pull --ff-only
+   .\.venv\Scripts\python.exe -m pip install --upgrade .
+   .\.venv\Scripts\mc_manager.exe --version
+   ```
+
 ### macOS (Terminal)
 
 1. Install Python 3.11 or newer and Git. Check `python3 --version` and

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.0.1 — 2026-10-02
+
+### Fixed
+
+- Decode Java properties escapes in Legacy Launcher game paths on Windows.
+- Recognize Minecraft's year-based versions, including `26.3`.
+- Prefer Legacy Launcher's selected `login.version` and inspect isolated game folders' version JSON.
+
 ## 1.0.0 — 2026-10-02
 
 ### Added

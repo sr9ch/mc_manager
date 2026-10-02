@@ -50,7 +50,7 @@ def first(data: dict, *keys: str) -> object:
 
 
 LOADER_RE = re.compile(r"(?i)(neoforge|forge|fabric|quilt)[-_ ](?:loader[-_ ]?)?([0-9][\w.+-]*)")
-MC_RE = re.compile(r"(?<!\d)(1\.\d+(?:\.\d+)?)(?!\d)")
+MC_RE = re.compile(r"(?<!\d)((?:1|2[6-9]|[3-9]\d)\.\d+(?:\.\d+)?)(?!\d)")
 
 
 def parse_version_id(version_id: str) -> tuple[DetectedValue, DetectedValue, DetectedValue]:
