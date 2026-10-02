@@ -66,6 +66,22 @@ class ScanStateTests(unittest.TestCase):
             self.assertEqual(report_changes(report, state), ["No changes since last scan."])
             self.assertEqual(json.loads(state.read_text())["schema"], 3)
 
+    def test_previous_instance_path_alias_does_not_look_new(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game = root / "game"
+            game.mkdir()
+            alias = root / "alias"
+            try:
+                alias.symlink_to(root, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"Directory symlinks unavailable: {exc}")
+            state = root / "seen.json"
+            state.write_text(json.dumps({"clients": ["prism"], "instances": [str(alias / "game")]}))
+            instance = MinecraftInstance("prism", "Pack", game, game)
+            report = DiscoveryReport([instance], {"prism": 1}, {"prism"}, [])
+            self.assertEqual(report_changes(report, state), ["No changes since last scan."])
+
     def test_corrupt_state_is_preserved(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -16,6 +16,25 @@ SCHEMA = 3
 DETAIL_LIMIT = 12
 
 
+def _canonical_instances(old: dict) -> dict:
+    """Match paths saved before or after OS-level symlink resolution."""
+    saved = old.get("instances", {})
+    if isinstance(saved, list):
+        saved = {key: {} for key in saved if isinstance(key, str)}
+    if not isinstance(saved, dict):
+        return old
+    instances = {}
+    for key, value in saved.items():
+        if not isinstance(key, str):
+            continue
+        try:
+            canonical = str(Path(key).resolve())
+        except (OSError, RuntimeError):
+            canonical = key
+        instances.setdefault(canonical, value)
+    return {**old, "instances": instances}
+
+
 def _load(path: Path) -> tuple[dict | None, bool]:
     if path.is_symlink():
         LOG.warning("Previous scan state is a symlink: %s", path)
@@ -26,7 +45,7 @@ def _load(path: Path) -> tuple[dict | None, bool]:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError("scan state must contain a JSON object")
-        return data, False
+        return _canonical_instances(data), False
     except (OSError, ValueError) as exc:
         LOG.warning("Could not read previous scan: %s", exc)
         return None, False

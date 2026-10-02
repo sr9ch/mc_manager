@@ -178,7 +178,7 @@ class CliTests(unittest.TestCase):
         with patch("builtins.input", side_effect=[str(self.repo)]):
             with redirect_stdout(io.StringIO()):
                 chosen = setup(self.report)
-        self.assertEqual(chosen.repository, self.repo)
+        self.assertEqual(chosen.repository.resolve(), self.repo.resolve())
         self.assertEqual(chosen.excluded_instances, [])
         self.assertEqual(load().excluded_clients, [])
 

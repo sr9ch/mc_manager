@@ -12,6 +12,7 @@ from mc_manager.discovery import (
     parse_version_metadata,
 )
 from mc_manager.generic import GenericFilesystemDiscovery, fingerprint
+from mc_manager.paths import minecraft_dir
 from mc_manager.shared_launchers import SharedLauncherAdapter, properties, version_from_game
 
 
@@ -102,7 +103,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertGreaterEqual(report.duplicates_merged, 1)
 
     def test_sklauncher_profiles_custom_directory(self):
-        root = self.home / ".minecraft"
+        root = minecraft_dir(self.home)
         game = self.home / "My Modpack"
         version(root, "forge-1.21.1-52.0.0", library="net.minecraftforge:forge:1.21.1-52.0.0")
         (game / "mods").mkdir(parents=True)
