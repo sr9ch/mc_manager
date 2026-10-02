@@ -434,6 +434,13 @@ def synchronize(report: DiscoveryReport, config: Config, args: argparse.Namespac
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(errors="replace")
+            except (OSError, ValueError):
+                pass
     args = parser().parse_args(argv)
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s: %(message)s"

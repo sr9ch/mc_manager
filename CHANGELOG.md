@@ -9,6 +9,7 @@
 - Decode Java properties escapes in Legacy Launcher game paths on Windows.
 - Recognize Minecraft's year-based versions, including `26.3`.
 - Prefer Legacy Launcher's selected `login.version` and inspect isolated game folders' version JSON.
+- Keep CLI output working with older Windows terminal encodings and normalize saved scan paths.
 
 ## 1.0.0 — 2026-10-02
 

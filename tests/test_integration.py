@@ -49,6 +49,7 @@ class EndToEndTests(unittest.TestCase):
                 "XDG_CONFIG_HOME": str(config_home),
                 "XDG_STATE_HOME": str(state),
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+                "PYTHONIOENCODING": "utf-8",
                 "PYTHONDONTWRITEBYTECODE": "1",
             }
 
