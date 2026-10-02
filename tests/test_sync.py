@@ -205,7 +205,7 @@ class SyncTests(unittest.TestCase):
         original_replace = __import__("os").replace
 
         def fail_once(source_path, destination_path):
-            if str(destination_path).endswith("other/mods/b.jar"):
+            if str(destination_path).replace("\\", "/").endswith("other/mods/b.jar"):
                 with patch("mc_manager.transaction.os.replace", original_replace):
                     raise OSError("simulated disk failure")
             return original_replace(source_path, destination_path)

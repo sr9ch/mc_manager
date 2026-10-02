@@ -35,6 +35,16 @@ def _unescape_property(value: str) -> str:
     return "".join(result)
 
 
+def _plain_windows_path(value: str) -> bool:
+    """Allow hand-edited paths whose backslashes were not Java-escaped."""
+    return (
+        len(value) >= 3
+        and value[0].isalpha()
+        and value[1:3] == ":\\"
+        and (len(value) == 3 or value[3] != "\\")
+    ) or (value.startswith("\\\\") and not value.startswith("\\\\\\\\"))
+
+
 def properties(path: Path) -> dict[str, str]:
     try:
         if not path.is_file() or path.is_symlink() or path.stat().st_size > 1024 * 1024:
@@ -53,7 +63,13 @@ def properties(path: Path) -> dict[str, str]:
             key, value = line.split(":", 1)
         else:
             continue
-        values[_unescape_property(key.strip()).lower()] = _unescape_property(value.strip())
+        name = _unescape_property(key.strip()).lower()
+        raw_value = value.strip()
+        values[name] = (
+            raw_value
+            if name in GAME_KEYS and _plain_windows_path(raw_value)
+            else _unescape_property(raw_value)
+        )
     return values
 
 

@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,7 +53,8 @@ class ScanStateTests(unittest.TestCase):
             changes = report_changes(report("1.21.2", {"prism"}), state)
             self.assertIn("Launcher no longer detected: sklauncher", changes)
             self.assertIn("  - mods/new.jar", changes)
-            self.assertEqual(state.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                self.assertEqual(state.stat().st_mode & 0o777, 0o600)
 
     def test_upgrades_previous_state_without_false_new_instances(self):
         with tempfile.TemporaryDirectory() as temporary:

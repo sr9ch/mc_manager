@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from mc_manager.discovery import (
     DirectoryAdapter,
+    candidate_roots,
     discover_report,
     parse_mmc_pack,
     parse_version_id,
@@ -36,6 +37,8 @@ class DiscoveryTests(unittest.TestCase):
         self.env = patch.dict(
             "os.environ",
             {
+                "APPDATA": str(self.home / "AppData/Roaming"),
+                "LOCALAPPDATA": str(self.home / "AppData/Local"),
                 "XDG_DATA_HOME": str(self.home / ".local/share"),
                 "XDG_CONFIG_HOME": str(self.home / ".config"),
                 "XDG_STATE_HOME": str(self.home / ".local/state"),
@@ -45,7 +48,7 @@ class DiscoveryTests(unittest.TestCase):
         self.addCleanup(self.env.stop)
 
     def test_prism_components_and_custom_game(self):
-        root = self.home / ".local/share/PrismLauncher/instances/BetterMC"
+        root = candidate_roots(self.home, "prism")[0] / "BetterMC"
         put(
             root / "mmc-pack.json",
             {
@@ -238,6 +241,8 @@ class DiscoveryTests(unittest.TestCase):
             r"minecraft.gamedir=C\:\\Users\\Player\\Minecraft" + "\n", encoding="utf-8"
         )
         self.assertEqual(properties(config)["minecraft.gamedir"], r"C:\Users\Player\Minecraft")
+        config.write_text(r"minecraft.gamedir=C:\Users\Player\Minecraft" + "\n", encoding="utf-8")
+        self.assertEqual(properties(config)["minecraft.gamedir"], r"C:\Users\Player\Minecraft")
 
     def test_legacy_portable_extra_root(self):
         game = self.home / "Portable Legacy/game"
@@ -319,7 +324,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(len(result.instances), 1)
 
     def test_generic_prism_duplicate(self):
-        root = self.home / ".local/share/PrismLauncher/instances/Pack"
+        root = candidate_roots(self.home, "prism")[0] / "Pack"
         put(root / "mmc-pack.json", {"components": [{"uid": "net.minecraft", "version": "1.21.1"}]})
         (root / "minecraft/mods").mkdir(parents=True)
         (root / "minecraft/config").mkdir()
