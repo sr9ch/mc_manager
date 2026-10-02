@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.0.0 — 2026-10-02
+
+### Added
+
+- One-time approval per newly found Minecraft build and version, with bulk approve,
+  bulk skip, and individual choices stored in the local configuration.
+- `sync --all-new` and `sync --skip-new` for noninteractive decisions.
+- Terminal activity and transfer progress indicators for scans, Git transfer, and sync.
+
+### Changed
+
+- Previously approved builds synchronize without repeat questions. Git commit and
+  optional push follow configuration without extra confirmation prompts.
+- Repository setup asks only for the Git location and clone destination.
+
 ## 0.3.0 — 2026-10-02
 
 ### Added

@@ -30,6 +30,7 @@ class Config:
     excluded_instances: list[str] = field(default_factory=list)
     extra_roots: dict[str, list[Path]] = field(default_factory=dict)
     destinations: dict[str, str] = field(default_factory=dict)
+    decisions: dict[str, bool] = field(default_factory=dict)
     ignores: list[str] = field(default_factory=list)
 
 
@@ -59,6 +60,7 @@ def load(path: Path | None = None) -> Config:
     selection = table("selection")
     roots = table("roots")
     destinations = table("destinations")
+    decisions = table("decisions")
     for name in ("path", "remote"):
         if not isinstance(repo.get(name, ""), str):
             raise ValueError(f"Invalid configuration {path}: repository.{name} must be text")
@@ -67,6 +69,8 @@ def load(path: Path | None = None) -> Config:
             raise ValueError(f"Invalid configuration {path}: sync.{name} must be true or false")
     if not all(isinstance(value, str) for value in destinations.values()):
         raise ValueError(f"Invalid configuration {path}: destinations must contain text paths")
+    if not all(isinstance(value, bool) for value in decisions.values()):
+        raise ValueError(f"Invalid configuration {path}: decisions must contain true or false")
     return Config(
         repository=Path(repo["path"]).expanduser() if repo.get("path") else None,
         remote=repo.get("remote"),
@@ -84,6 +88,7 @@ def load(path: Path | None = None) -> Config:
             k: [Path(p).expanduser() for p in strings(v, f"roots.{k}")] for k, v in roots.items()
         },
         destinations=dict(destinations),
+        decisions=dict(decisions),
         ignores=strings(sync.get("ignores", []), "sync.ignores"),
     )
 
@@ -115,6 +120,8 @@ def save(config: Config, path: Path | None = None) -> None:
     )
     lines.extend(["", "[destinations]"])
     lines.extend(f"{q(k)} = {q(v)}" for k, v in sorted(config.destinations.items()))
+    lines.extend(["", "[decisions]"])
+    lines.extend(f"{q(k)} = {str(v).lower()}" for k, v in sorted(config.decisions.items()))
     descriptor, temporary = tempfile.mkstemp(prefix=".config-", suffix=".toml", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:

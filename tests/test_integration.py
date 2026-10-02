@@ -68,7 +68,7 @@ class EndToEndTests(unittest.TestCase):
             self.assertIn("First scan saved as baseline", first_scan)
             self.assertIn("+ mods/example.jar", invoke("sync", "--dry-run"))
             self.assertFalse(target.exists())
-            invoke("sync")
+            invoke("sync", "--all-new")
             self.assertEqual(target.read_text(), "first")
             mod.write_text("second")
             self.assertIn("Content changed in Pack: +0 ~1 -0 files", invoke("scan"))

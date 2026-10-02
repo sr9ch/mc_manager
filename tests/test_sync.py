@@ -65,6 +65,18 @@ class SyncTests(unittest.TestCase):
         apply_plan(third, self.repo)
         self.assertFalse((self.repo / self.relative / "mods/sodium.jar").exists())
 
+    def test_transaction_reports_loading_and_writing_progress(self):
+        self.write("mods/a.jar", "a" * 10)
+        updates = []
+        apply_plans(
+            [self.plan()],
+            self.repo,
+            lambda phase, current, total: updates.append((phase, current, total)),
+        )
+        self.assertIn(("Loading files", 10, 10), updates)
+        self.assertEqual(updates[-1][0], "Writing repository")
+        self.assertEqual(updates[-1][1], updates[-1][2])
+
     def test_ignore_and_datapacks(self):
         self.write("mods/keep.jar")
         self.write("mods/ignore.jar")
@@ -258,10 +270,12 @@ class SyncTests(unittest.TestCase):
         path = self.base / "config.toml"
         config = Config(self.repo, excluded_clients=["legacy"], ignores=["mods/private*"])
         config.destinations[self.instance.key] = self.relative.as_posix()
+        config.decisions['["game","1.21.1","fabric",null]'] = False
         save(config, path)
         parsed = load(path)
         self.assertEqual(parsed.repository, self.repo)
         self.assertEqual(parsed.destinations, config.destinations)
+        self.assertEqual(parsed.decisions, config.decisions)
         self.assertEqual(parsed.ignores, ["mods/private*"])
 
     def test_git_status_and_stage(self):

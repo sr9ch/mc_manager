@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -155,18 +156,34 @@ def recover_transaction(repository: Path) -> bool:
     return True
 
 
-def _stage_file(source: Path, destination: Path, expected_hash: str) -> None:
+Progress = Callable[[str, int, int], None]
+
+
+def _stage_file(
+    source: Path,
+    destination: Path,
+    expected_hash: str,
+    on_chunk: Callable[[int], None] | None = None,
+) -> None:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     with os.fdopen(os.open(source, flags), "rb") as stream:
         with destination.open("xb") as output:
-            shutil.copyfileobj(stream, output, 1024 * 1024)
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                output.write(block)
+                if on_chunk:
+                    on_chunk(len(block))
             output.flush()
             os.fsync(output.fileno())
     if sha256_file(destination) != expected_hash:
         raise SafetyError(f"Source changed during copy: {source}")
 
 
-def _prepare(plans: list[Plan], repository: Path, root: Path) -> list[dict]:
+def _prepare(
+    plans: list[Plan],
+    repository: Path,
+    root: Path,
+    on_chunk: Callable[[int], None] | None = None,
+) -> list[dict]:
     operations: list[dict] = []
     targets: set[str] = set()
     for plan in plans:
@@ -204,7 +221,7 @@ def _prepare(plans: list[Plan], repository: Path, root: Path) -> list[dict]:
                 ):
                     raise SafetyError(f"Source changed since scan: {source}")
                 new_hash = change.sha256
-                _stage_file(source, root / "new" / str(len(operations)), new_hash)
+                _stage_file(source, root / "new" / str(len(operations)), new_hash, on_chunk)
             target_name = target.relative_to(repository).as_posix()
             if target_name in targets:
                 raise SafetyError(f"Destination collision: {target}")
@@ -238,7 +255,9 @@ def _prepare(plans: list[Plan], repository: Path, root: Path) -> list[dict]:
     return operations
 
 
-def _apply(repository: Path, root: Path, operations: list[dict]) -> list[Path]:
+def _apply(
+    repository: Path, root: Path, operations: list[dict], progress: Progress | None = None
+) -> list[Path]:
     written = []
     for index, operation in enumerate(operations):
         target = assert_destination(repository, safe_relative(operation["target"]))
@@ -253,15 +272,36 @@ def _apply(repository: Path, root: Path, operations: list[dict]) -> list[Path]:
             os.replace(root / "new" / str(index), target)
         _sync_directory(target.parent)
         written.append(target)
+        if progress:
+            progress("Writing repository", len(written), len(operations))
     return written
 
 
-def apply_plans(plans: list[Plan], repository: Path) -> list[Path]:
+def apply_plans(
+    plans: list[Plan], repository: Path, progress: Progress | None = None
+) -> list[Path]:
     """Stage all selected instances, then apply them as one recoverable transaction."""
     assert_plain_directory(repository)
     recover_transaction(repository)
     if not any(plan.changed for plan in plans):
         return []
+    total_bytes = sum(
+        change.source.stat().st_size
+        for plan in plans
+        for change in plan.changes
+        if change.source is not None and change.kind != "delete"
+    )
+    display_total = max(total_bytes, 1)
+    copied = 0
+
+    def on_chunk(size: int) -> None:
+        nonlocal copied
+        copied += size
+        if progress:
+            progress("Loading files", copied, display_total)
+
+    if progress:
+        progress("Loading files", 0, display_total)
     root = repository / TRANSACTION
     try:
         root.mkdir(mode=0o700)
@@ -271,7 +311,9 @@ def apply_plans(plans: list[Plan], repository: Path) -> list[Path]:
         _write_journal(root, "staging", [])
         (root / "new").mkdir(mode=0o700)
         (root / "old").mkdir(mode=0o700)
-        operations = _prepare(plans, repository, root)
+        operations = _prepare(plans, repository, root, on_chunk)
+        if progress:
+            progress("Loading files", display_total, display_total)
         _write_journal(root, "ready", operations)
     except BaseException:
         if (root / JOURNAL).exists():
@@ -280,7 +322,7 @@ def apply_plans(plans: list[Plan], repository: Path) -> list[Path]:
             root.rmdir()
         raise
     try:
-        written = _apply(repository, root, operations)
+        written = _apply(repository, root, operations, progress)
         _write_journal(root, "committed", operations)
     except BaseException:
         try:

@@ -7,9 +7,8 @@ runtime packages are required.
 ## Installation and first launch
 
 There are **two different repositories**: the `mc_manager` source code and a separate
-Git repository for Minecraft builds. The source checkout in this workspace has no
-configured remote, so replace `SOURCE_REPOSITORY_URL` below with the actual source
-URL when installing on another computer. If you already have the `mc_manager` folder,
+Git repository for Minecraft builds. Clone the source from
+`https://github.com/sr9ch/mc_manager.git`. If you already have the `mc_manager` folder,
 start at `cd mc_manager`. The commands use a virtual environment inside the source
 folder; they do not change the system Python installation.
 
@@ -28,7 +27,7 @@ folder; they do not change the system Python installation.
 2. Clone and install `mc_manager`:
 
    ```bash
-   git clone "SOURCE_REPOSITORY_URL" mc_manager
+   git clone https://github.com/sr9ch/mc_manager.git mc_manager
    cd mc_manager
    python3 -m venv .venv
    .venv/bin/python -m pip install .
@@ -44,9 +43,9 @@ folder; they do not change the system Python installation.
    ```
 
    At the repository prompt, paste `https://github.com/sr9ch/mc_versions.git` (or
-   your own Git URL). Press Enter to use the default local clone, then press Enter at
-   both exclusion prompts to include every detected build and launcher. To review and
-   sync, run `.venv/bin/mc_manager sync --dry-run` and then `.venv/bin/mc_manager`.
+   your own Git URL). Press Enter to use the default local clone. To review and sync,
+   run `.venv/bin/mc_manager sync --dry-run` and then `.venv/bin/mc_manager`.
+   Choose all new builds, none, or answer once for each build when prompted.
    For later launches from another directory, use the absolute path to
    `mc_manager/.venv/bin/mc_manager`.
 
@@ -58,7 +57,7 @@ folder; they do not change the system Python installation.
 2. Clone and install `mc_manager`:
 
    ```powershell
-   git clone "SOURCE_REPOSITORY_URL" mc_manager
+   git clone https://github.com/sr9ch/mc_manager.git mc_manager
    cd mc_manager
    py -3 -m venv .venv
    .\.venv\Scripts\python.exe -m pip install .
@@ -74,10 +73,11 @@ folder; they do not change the system Python installation.
    ```
 
    Paste `https://github.com/sr9ch/mc_versions.git` (or your own Git URL) at the
-   repository prompt. Press Enter for the default clone under `%LOCALAPPDATA%`, then
-   press Enter at both exclusion prompts. Check with
+   repository prompt. Press Enter for the default clone under `%LOCALAPPDATA%`.
+   Check with
    `.\.venv\Scripts\mc_manager.exe sync --dry-run`; run
-   `.\.venv\Scripts\mc_manager.exe` to synchronize. Use the full path to that `.exe`
+   `.\.venv\Scripts\mc_manager.exe` to choose which new builds to synchronize.
+   Use the full path to that `.exe`
    for later launches from another folder. Activation is optional, so PowerShell's
    script execution policy does not need to change.
 
@@ -90,7 +90,7 @@ folder; they do not change the system Python installation.
 2. Clone and install `mc_manager`:
 
    ```bash
-   git clone "SOURCE_REPOSITORY_URL" mc_manager
+   git clone https://github.com/sr9ch/mc_manager.git mc_manager
    cd mc_manager
    python3 -m venv .venv
    .venv/bin/python -m pip install .
@@ -106,8 +106,8 @@ folder; they do not change the system Python installation.
    ```
 
    Paste `https://github.com/sr9ch/mc_versions.git` (or your own Git URL), press
-   Enter for the default clone under `~/Library/Application Support/mc_manager`, and
-   press Enter at both exclusion prompts. Run `.venv/bin/mc_manager sync --dry-run`,
+   Enter for the default clone under `~/Library/Application Support/mc_manager`.
+   Run `.venv/bin/mc_manager sync --dry-run`,
    then `.venv/bin/mc_manager`. Use the absolute path to the executable for later
    launches from another folder.
 
@@ -175,7 +175,6 @@ Two setup options are supported:
    SSH authentication or a Git credential helper must already work. Passwords,
    tokens, URL queries, `http://`, and `file://` clone URLs are not accepted.
 
-At the exclusion prompts, press Enter to include all detected instances and launchers.
 Before the first synchronization, configure `user.name` and `user.email` in the chosen
 local repository. For a direct remote clone at the default Linux path, run:
 
@@ -196,9 +195,12 @@ mc_manager sync --dry-run
 mc_manager
 ```
 
-The final command shows changes and asks before copying. After copying it offers a
-Git commit and, when `origin` exists, a push. A local-only repository has no push
-target until you add a remote.
+The final command asks once about each new build: choose **all**, **none**, or
+**each** and answer yes/no per build. Decisions are saved locally. On later runs,
+previously approved builds sync automatically; declined builds stay excluded for
+that version. If the Minecraft or loader version changes, the build gets a new
+decision. Commit is automatic when `git_commit = true`; push runs only when
+`git_push = true`. A local-only repository has no push target until you add a remote.
 
 If the Git URL requires sign-in, configure your Git credential helper or SSH key
 first. GitHub account passwords are not accepted in HTTPS URLs; use a supported
@@ -220,14 +222,14 @@ credential flow. The wizard rejects credentials embedded in a URL.
   `kubejs`, `scripts`, `patchouli_books`, root `datapacks`, and
   `saves/<world>/datapacks` without copying the world itself.
 - Detects additions, edits, and deletions, with a manifest of managed files and hashes.
-- Uses Git fast-forward pull only when explicitly enabled, and offers commit and push
-  after synchronization. It never runs `reset --hard` or `clean -fd`.
+- Uses Git fast-forward pull only when explicitly enabled. Automatic commit and push
+  follow configuration. It never runs `reset --hard` or `clean -fd`.
 
 Example output from a scan:
 
 ```text
 $ mc_manager scan
-Minecraft Manager 0.3.0
+Minecraft Manager 1.0.0
 Scanning local installations...
 
 2 launchers detected; 2 unique installations
@@ -307,10 +309,13 @@ again, then `mc_manager sync --dry-run` to review the build paths.
 
 | Command | Effect |
 | --- | --- |
-| `mc_manager` | Scan, show changes since the last launch, then offer sync if configured |
+| `mc_manager` | Scan, decide once for new builds, and sync approved builds |
 | `mc_manager scan [--force] [--debug]` | Scan and display launchers, instances, and recent changes |
 | `mc_manager status` | Show pending file and metadata changes |
-| `mc_manager sync [name] [--dry-run]` | Sync all enabled instances or a matching name |
+| `mc_manager sync [name] [--dry-run]` | Preview or sync approved builds, optionally matching a name |
+| `mc_manager sync --all-new` | Approve all newly found builds and sync without prompts |
+| `mc_manager sync --skip-new` | Decline all newly found builds without prompts |
+| `mc_manager sync "Pack" --reconsider` | Ask again for one build's current version |
 | `mc_manager clients` | Show launcher discovery results |
 | `mc_manager instances` | Show unique game directories |
 | `mc_manager config` | Show configuration path and repository |
@@ -324,8 +329,10 @@ the command.
 
 `scan` never writes repository content. `status` and `sync --dry-run` only inspect
 content, except that an interrupted prior sync is rolled back before inspection.
-A noninteractive invocation with `ask_before_sync = true` prints the plan and skips
-sync. Set it to `false` only if unattended synchronization is intended.
+In a noninteractive run, undecided new builds are skipped until you choose in a
+terminal or pass `--all-new` or `--skip-new`. Previously approved builds can sync
+without a prompt. The legacy `ask_before_sync` config field remains readable for
+older installations but no longer controls this approval flow.
 
 ## Repository layout and configuration
 
@@ -376,6 +383,8 @@ excluded_instances = []
 
 [roots]
 prism = ["/path/to/portable/PrismLauncher/instances"]
+
+# The tool writes remembered yes/no answers to [decisions] automatically.
 ```
 
 A game directory can also contain `.mcmanagerignore` with one glob per line. Patterns

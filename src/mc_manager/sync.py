@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from .config import Config
@@ -216,10 +217,14 @@ def plan_instance(
     return Plan(instance, destination, changes, hashes, metadata_changed, manifest_hash)
 
 
-def apply_plans(plans: list[Plan], repository: Path) -> list[Path]:
+def apply_plans(
+    plans: list[Plan],
+    repository: Path,
+    progress: Callable[[str, int, int], None] | None = None,
+) -> list[Path]:
     from .transaction import apply_plans as transactional_apply
 
-    return transactional_apply(plans, repository)
+    return transactional_apply(plans, repository, progress)
 
 
 def apply_plan(plan: Plan, repository: Path) -> list[Path]:
