@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.1 — 2026-10-02
+
+### Fixed
+
+- Exclude the configured Git repository from generic Minecraft discovery after the
+  first synchronization, so subsequent scans do not treat backup files as game installs.
+
 ## 0.2.0 — 2026-10-02
 
 ### Added

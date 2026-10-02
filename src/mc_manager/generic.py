@@ -134,11 +134,13 @@ class GenericFilesystemDiscovery:
         max_depth: int = MAX_DEPTH,
         max_visited: int = MAX_VISITED,
         prune: set[str] | None = None,
+        excluded_roots: list[Path] | None = None,
     ) -> None:
         self.roots = search_roots(home, extra_roots)
         self.max_depth = max_depth
         self.max_visited = max_visited
         self.prune = prune if prune is not None else PRUNE
+        self.excluded_roots = tuple(path.resolve() for path in excluded_roots or [])
 
     def scan(self, debug: bool = False) -> GenericResult:
         result = GenericResult()
@@ -148,6 +150,10 @@ class GenericFilesystemDiscovery:
             path, depth = queue.pop(0)
             try:
                 if path.is_symlink() or not path.is_dir():
+                    continue
+                if any(path.resolve().is_relative_to(root) for root in self.excluded_roots):
+                    if debug:
+                        result.debug.append(f"Excluded repository directory: {path}")
                     continue
                 stat = path.stat()
                 identity = (stat.st_dev, stat.st_ino)

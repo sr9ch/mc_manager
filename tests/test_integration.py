@@ -24,8 +24,8 @@ class EndToEndTests(unittest.TestCase):
             mod = game / "mods/example.jar"
             mod.write_text("first")
 
-            repository = home / "repository"
-            repository.mkdir()
+            repository = data / "mc_manager/repository"
+            repository.mkdir(parents=True)
             for command in (
                 ["git", "init", "-q", str(repository)],
                 ["git", "-C", str(repository), "config", "user.name", "Test"],
@@ -84,6 +84,8 @@ class EndToEndTests(unittest.TestCase):
                 ),
                 "",
             )
+            self.assertIn("1 changed; 0 unchanged", invoke("status"))
+            self.assertIn("1 unique installation", invoke("scan"))
 
 
 if __name__ == "__main__":

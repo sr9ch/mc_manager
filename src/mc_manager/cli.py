@@ -219,7 +219,9 @@ def main(argv: list[str] | None = None) -> int:
         config = load()
         first_launch = not state_path().exists()
         report = discover_report(
-            extra_roots=config.extra_roots, debug=getattr(args, "debug", False)
+            extra_roots=config.extra_roots,
+            debug=getattr(args, "debug", False),
+            excluded_roots=[config.repository] if config.repository else [],
         )
         show_scan(report)
         if getattr(args, "debug", False):

@@ -116,6 +116,8 @@ target until you add a remote.
   versions. Values are marked `detected`, `inferred`, or `unknown`.
 - Merges results that point to the same physical game directory, so shared launcher
   directories are synchronized once.
+- Excludes the configured Git repository from filesystem discovery, including after
+  synchronized files have been added to it.
 - Synchronizes `mods`, `shaderpacks`, `resourcepacks`, `config`, `defaultconfigs`,
   `kubejs`, `scripts`, `patchouli_books`, root `datapacks`, and
   `saves/<world>/datapacks` without copying the world itself.

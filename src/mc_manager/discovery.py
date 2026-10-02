@@ -321,7 +321,10 @@ def _merge_value(values: list[DetectedValue]) -> DetectedValue:
 
 
 def discover_report(
-    home: Path | None = None, extra_roots: dict[str, list[Path]] | None = None, debug: bool = False
+    home: Path | None = None,
+    extra_roots: dict[str, list[Path]] | None = None,
+    debug: bool = False,
+    excluded_roots: list[Path] | None = None,
 ) -> DiscoveryReport:
     from .generic import GenericFilesystemDiscovery
     from .shared_launchers import SharedLauncherAdapter
@@ -343,7 +346,9 @@ def discover_report(
         if isinstance(adapter, DirectoryAdapter)
         for root in adapter.roots
     )
-    generic = GenericFilesystemDiscovery(home, extra).scan(debug=debug)
+    generic = GenericFilesystemDiscovery(home, extra, excluded_roots=excluded_roots).scan(
+        debug=debug
+    )
     groups: dict[tuple[int, int], list[MinecraftInstance]] = {}
     counts: dict[str, int] = {}
     installed: set[str] = set()
