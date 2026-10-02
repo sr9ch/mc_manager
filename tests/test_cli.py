@@ -95,6 +95,72 @@ class CliTests(unittest.TestCase):
         self.assertEqual(chosen.excluded_instances, [self.report.instances[0].key])
         self.assertEqual(load().excluded_clients, ["prism"])
 
+    def test_repeating_setup_preserves_sync_settings_and_does_not_sync(self):
+        existing = Config(
+            self.repo,
+            ask_before_sync=False,
+            git_commit=False,
+            git_pull=True,
+            ignores=["mods/private-*"],
+            destinations={self.report.instances[0].key: "minecraft/prism/old-name"},
+        )
+        save(existing)
+        with patch("mc_manager.cli.sys.stdin") as stdin:
+            stdin.isatty.return_value = True
+            with patch("builtins.input", side_effect=[str(self.repo), "", ""]):
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["config", "--setup"]), 0)
+        updated = load()
+        self.assertFalse(updated.ask_before_sync)
+        self.assertFalse(updated.git_commit)
+        self.assertTrue(updated.git_pull)
+        self.assertEqual(updated.ignores, existing.ignores)
+        self.assertEqual(updated.destinations, existing.destinations)
+        self.assertFalse((self.repo / "minecraft").exists())
+
+    def test_existing_remote_clone_can_be_selected_again(self):
+        url = "git@github.com:example/minecraft-configs.git"
+        subprocess.run(["git", "-C", str(self.repo), "remote", "add", "origin", url], check=True)
+        save(Config(self.repo, remote=url))
+        with patch("builtins.input", side_effect=[url, "", "", ""]):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(setup(self.report).repository, self.repo)
+        with patch("builtins.input", side_effect=[str(self.repo), "", ""]):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(setup(self.report).remote, url)
+        save(Config(self.repo))
+        with patch("builtins.input", side_effect=[url, str(self.repo), "", ""]):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(setup(self.report).remote, url)
+
+    def test_setup_rejects_invalid_exclusions(self):
+        for answers, message in (
+            ([str(self.repo), "99"], "Invalid instance number"),
+            ([str(self.repo), "", "unknown"], "Unknown launcher ID"),
+        ):
+            with self.subTest(answers=answers):
+                with patch("builtins.input", side_effect=answers):
+                    with redirect_stdout(io.StringIO()):
+                        with self.assertRaisesRegex(GitError, message):
+                            setup(self.report)
+                self.assertEqual(load().excluded_clients, [])
+
+    def test_invalid_config_reports_a_clear_error(self):
+        path = self.root / "config/mc_manager/config.toml"
+        path.write_text('[sync]\ngit_commit = "false"\n')
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.assertEqual(main(["config"]), 1)
+        self.assertIn("sync.git_commit must be true or false", err.getvalue())
+
+    def test_scan_output_groups_launchers_and_installations(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["scan"]), 0)
+        self.assertIn("Scanning local installations", output.getvalue())
+        self.assertIn("Launchers\n", output.getvalue())
+        self.assertIn("Installations\n", output.getvalue())
+        self.assertNotIn("not found", output.getvalue())
+
     def test_missing_git_identity_blocks_before_copy(self):
         save(Config(self.repo, ask_before_sync=False, git_commit=True))
         with patch(

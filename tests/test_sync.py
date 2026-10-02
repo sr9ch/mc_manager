@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mc_manager.config import Config, load, save
 from mc_manager.git import GitError, dirty, stage, validate_remote_url, verify_repository
@@ -80,12 +81,30 @@ class SyncTests(unittest.TestCase):
         files = source_files(self.instance)
         self.assertEqual(list(files), ["config/public.json"])
 
-    def test_source_symlink_is_skipped(self):
+    def test_source_symlink_is_rejected(self):
         outside = self.base / "secret.txt"
         outside.write_text("secret")
         (self.game / "mods").mkdir()
         (self.game / "mods/link.jar").symlink_to(outside)
-        self.assertEqual(source_files(self.instance), {})
+        with self.assertRaisesRegex(SafetyError, "Symlinked source file"):
+            source_files(self.instance)
+
+    def test_ignored_symlinked_category_is_skipped(self):
+        shared = self.base / "shared"
+        shared.mkdir()
+        (self.game / "mods").symlink_to(shared, target_is_directory=True)
+        self.assertEqual(source_files(self.instance, ["mods"]), {})
+
+    def test_replaced_source_directory_does_not_delete_backup(self):
+        mod = self.write("mods/nested/a.jar")
+        apply_plan(self.plan(), self.repo)
+        backup = self.repo / self.relative / "mods/nested/a.jar"
+        shared = self.base / "shared"
+        mod.parent.rename(shared)
+        mod.parent.symlink_to(shared, target_is_directory=True)
+        with self.assertRaisesRegex(SafetyError, "Symlinked source directory"):
+            self.plan()
+        self.assertTrue(backup.exists())
 
     def test_destination_symlink_is_rejected(self):
         self.write("mods/a.jar")
@@ -110,6 +129,30 @@ class SyncTests(unittest.TestCase):
         source.write_text("new local")
         with self.assertRaises(SafetyError):
             self.plan()
+
+    def test_malformed_manifest_is_reported_as_safety_error(self):
+        manifest = self.repo / self.relative / "mc_manager.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("[]")
+        with self.assertRaisesRegex(SafetyError, "Unknown manifest schema"):
+            self.plan()
+        manifest.write_text(json.dumps({"schema": 1, "files": {"mods/a.jar": "z" * 64}}))
+        with self.assertRaisesRegex(SafetyError, "Invalid hash"):
+            self.plan()
+        manifest.write_text(json.dumps({"schema": 1, "files": {"other/a.jar": "a" * 64}}))
+        with self.assertRaisesRegex(SafetyError, "Unmanaged path"):
+            self.plan()
+
+    def test_unreadable_source_directory_does_not_plan_deletions(self):
+        self.write("mods/a.jar")
+
+        def fail_walk(_source_dir, **options):
+            options["onerror"](PermissionError("source directory denied"))
+
+        with patch("mc_manager.sync.os.walk", side_effect=fail_walk):
+            with self.assertRaisesRegex(SafetyError, "source directory denied"):
+                self.plan()
+        self.assertFalse((self.repo / self.relative).exists())
 
     def test_changed_later_source_does_not_partially_apply_plan(self):
         self.write("mods/a.jar", "first")

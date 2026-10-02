@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.2.3 — 2026-10-02
+
+### Fixed
+
+- Keep synchronization settings and destination mappings when running setup again.
+- Finish `config --setup` after saving, without starting a synchronization.
+- Stop safely on unreadable or symlinked source content and malformed sync manifests.
+- Report invalid configuration values with a clear error.
+
+### Improved
+
+- Group launcher, installation, scan-change, and repository results on startup.
+- Show extra discovery details with `--verbose`.
+
 ## 0.2.2 — 2026-10-02
 
 ### Improved

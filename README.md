@@ -129,19 +129,23 @@ Example output from a scan:
 
 ```text
 $ mc_manager scan
-Minecraft Manager
-
-Scanning clients...
-
-✓ Prism Launcher: 0 installations
-✗ Legacy Launcher: not found
-✗ TLauncher: not found
-✓ SKLauncher: 2 installations
-  └─ 1.21.11: 1.21.11, fabric 0.19.5 [detected]
-  └─ 26.3: 26.3, quilt 0.31.0-beta.4 [detected]
+Minecraft Manager 0.2.3
+Scanning local installations...
 
 2 launchers detected; 2 unique installations
-Discovery: generic 2; duplicates merged 2
+
+Launchers
+  ✓ Prism Launcher — installed, no instances
+  ✓ SKLauncher — 2 installations
+
+Installations
+  • 1.21.11 — SKLauncher
+    Minecraft 1.21.11 · fabric 0.19.5 [detected]
+  • 26.3 — SKLauncher
+    Minecraft 26.3 · quilt 0.31.0-beta.4 [detected]
+
+Changes since last scan
+  First scan saved as baseline.
 ```
 
 ## Discovery
@@ -202,7 +206,8 @@ independent instances; unplayed empty entries are not synchronized.
 
 Large change plans show totals by change type and directory, followed by the first
 12 paths. Use `mc_manager --verbose status` or `mc_manager --verbose sync --dry-run`
-to see every path. The global `--verbose` flag goes before the command.
+to see every path and more discovery details. The global `--verbose` flag goes before
+the command.
 
 `status`, `scan`, and `sync --dry-run` never copy or delete Minecraft content. A
 noninteractive invocation with `ask_before_sync = true` prints the plan and skips
@@ -261,8 +266,8 @@ itself is never copied.
 
 Only the listed content directories are read. Logs, screenshots, caches, libraries,
 assets, runtime files, account data, secret-looking filenames and text containing
-common credential keys are skipped. Symlinked source files and destination paths are
-rejected or skipped; repository deletions are restricted to manifest-owned files whose
+common credential keys are skipped. Eligible symlinked content blocks synchronization;
+repository deletions are restricted to manifest-owned files whose
 hash still matches. Existing unmanaged files block a collision. A dirty Git repository
 blocks sync, and pull uses `--ff-only` when enabled. No Minecraft files are modified.
 

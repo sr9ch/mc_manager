@@ -19,7 +19,9 @@ from .git import (
     has_origin,
     pull,
     push,
+    run,
     stage,
+    validate_remote_url,
     verify_repository,
 )
 from .models import MinecraftInstance, Plan
@@ -56,8 +58,7 @@ def ask(message: str, default: bool = True) -> bool:
 
 
 def show_scan(report: DiscoveryReport) -> None:
-    print("Minecraft Manager\n\nScanning clients...\n")
-    for client in (
+    order = (
         "prism",
         "legacy",
         "tlauncher",
@@ -68,39 +69,56 @@ def show_scan(report: DiscoveryReport) -> None:
         "atlauncher",
         "curseforge",
         "gdlauncher",
-        "generic",
-    ):
-        count = report.clients.get(client, 0)
-        if client == "generic" and not any(i.client == "generic" for i in report.instances):
-            continue
-        if client in report.installed:
-            mark = "?" if client == "generic" else "✓"
-            noun = "candidate" if client == "generic" else "installation"
-            noun += "" if count == 1 else "s"
-            print(f"{mark} {NAMES[client]}: {count} {noun}")
-            for instance in report.instances:
-                if client not in (instance.launchers or (instance.client,)):
-                    continue
-                if client != instance.client:
-                    print(f"  └─ {instance.name} — shared with {NAMES[instance.client]}")
-                else:
-                    version = instance.minecraft.value or "unknown"
-                    loader = instance.loader.value or "unknown"
-                    loader_v = (
-                        f" {instance.loader_version.value}" if instance.loader_version.value else ""
-                    )
-                    detail = f"{version}, {loader}{loader_v} [{instance.minecraft.confidence}]"
-                    print(f"  └─ {instance.name}: {detail}")
-        elif client in {"prism", "legacy", "tlauncher", "sklauncher"}:
-            print(f"✗ {NAMES[client]}: not found")
+    )
     known = report.installed - {"generic"}
     launcher_word = "launcher" if len(known) == 1 else "launchers"
     installation_word = "installation" if len(report.instances) == 1 else "installations"
     summary = f"{len(known)} {launcher_word} detected; "
     summary += f"{len(report.instances)} unique {installation_word}"
-    print(f"\n{summary}")
-    generic_count = report.clients.get("generic", 0)
-    print(f"Discovery: generic {generic_count}; duplicates merged {report.duplicates_merged}")
+    print(f"\n{summary}\n\nLaunchers")
+    for client in order:
+        if client in known:
+            count = report.clients.get(client, 0)
+            detail = (
+                "installed, no instances"
+                if count == 0
+                else f"{count} {'installation' if count == 1 else 'installations'}"
+            )
+            print(f"  ✓ {NAMES[client]} — {detail}")
+    if not known:
+        print("  None detected")
+    print("\nInstallations")
+    for instance in report.instances:
+        launchers = instance.launchers or (instance.client,)
+        names = ", ".join(NAMES.get(client, client) for client in launchers)
+        version = instance.minecraft.value or "unknown"
+        loader = instance.loader.value or "unknown"
+        loader_version = (
+            f" {instance.loader_version.value}" if instance.loader_version.value else ""
+        )
+        print(f"  • {instance.name} — {names}")
+        print(
+            f"    Minecraft {version} · {loader}{loader_version} [{instance.minecraft.confidence}]"
+        )
+    if not report.instances:
+        print("  None detected")
+
+
+def show_discovery_details(report: DiscoveryReport) -> None:
+    print("\nDiscovery details")
+    missing = [
+        NAMES[client]
+        for client in ("prism", "legacy", "tlauncher", "sklauncher")
+        if client not in report.installed
+    ]
+    if missing:
+        print("  Not detected: " + ", ".join(missing))
+    print(
+        f"  Generic candidates: {report.clients.get('generic', 0)}; "
+        f"duplicates merged {report.duplicates_merged}"
+    )
+    for instance in report.instances:
+        print(f"  {instance.name}: {instance.game_dir}")
 
 
 def setup(report: DiscoveryReport) -> Config:
@@ -114,25 +132,52 @@ def setup(report: DiscoveryReport) -> Config:
     raw = input("Git repository path or SSH/HTTPS URL: ").strip()
     if not raw:
         raise GitError("A Git repository is required")
-    config = Config()
+    config = load()
     if raw.startswith(("git@", "https://", "ssh://")):
-        default = data_path() / "repository"
+        default = (
+            config.repository
+            if config.remote == raw and config.repository
+            else data_path() / "repository"
+        )
         local = input(f"Local clone directory [{default}]: ").strip()
         destination = Path(local).expanduser() if local else default
-        clone(raw, destination)
+        if destination.exists():
+            verify_repository(destination)
+            if run(destination, "config", "--get", "remote.origin.url") != raw:
+                raise GitError(f"Clone destination has a different origin URL: {destination}")
+        else:
+            clone(raw, destination)
         config.repository, config.remote = destination, raw
+    elif "://" in raw or raw.startswith("git@"):
+        validate_remote_url(raw)
+        raise GitError("Use an HTTPS or SSH Git URL")
     else:
         repo = Path(raw).expanduser()
         verify_repository(repo)
+        previous_repo = config.repository
+        previous_remote = config.remote
         config.repository = repo.resolve()
+        config.remote = (
+            previous_remote
+            if previous_repo and previous_repo.resolve() == config.repository
+            else None
+        )
     excluded = input("Instance numbers to exclude (comma separated; Enter for all): ").strip()
+    config.excluded_instances = []
     if excluded:
         for part in excluded.split(","):
-            if part.strip().isdigit() and 1 <= int(part.strip()) <= len(report.instances):
-                config.excluded_instances.append(report.instances[int(part.strip()) - 1].key)
-    print("Launcher IDs: " + ", ".join(sorted(report.installed - {"generic"})))
+            value = part.strip()
+            if not value.isdigit() or not 1 <= int(value) <= len(report.instances):
+                raise GitError(f"Invalid instance number: {value or '(empty)'}")
+            config.excluded_instances.append(report.instances[int(value) - 1].key)
+        config.excluded_instances = list(dict.fromkeys(config.excluded_instances))
+    available_clients = report.installed - {"generic"}
+    print("Launcher IDs: " + (", ".join(sorted(available_clients)) or "none"))
     clients = input("Launcher IDs to exclude (comma separated; Enter for all): ").strip()
     config.excluded_clients = [s.strip().lower() for s in clients.split(",") if s.strip()]
+    unknown = set(config.excluded_clients) - available_clients
+    if unknown:
+        raise GitError("Unknown launcher ID: " + ", ".join(sorted(unknown)))
     save(config)
     print(f"Saved {config_path()}")
     return config
@@ -169,7 +214,7 @@ def make_plans(report: DiscoveryReport, config: Config, selected: str | None = N
 
 def show_plans(plans: list[Plan], verbose: bool = False) -> None:
     changed = [p for p in plans if p.changed]
-    print(f"\n{len(changed)} changed; {len(plans) - len(changed)} unchanged")
+    print(f"\nRepository\n  {len(changed)} changed; {len(plans) - len(changed)} unchanged")
     for plan in changed:
         print(f"\n{NAMES.get(plan.instance.client, plan.instance.client)} / {plan.instance.name}")
         if not plan.changes:
@@ -241,25 +286,30 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         config = load()
         first_launch = not state_path().exists()
+        print(f"Minecraft Manager {__version__}\nScanning local installations...", flush=True)
         report = discover_report(
             extra_roots=config.extra_roots,
             debug=getattr(args, "debug", False),
             excluded_roots=[config.repository] if config.repository else [],
         )
         show_scan(report)
+        if args.verbose or getattr(args, "debug", False):
+            show_discovery_details(report)
         if getattr(args, "debug", False):
+            print("\nCandidate details")
             for line in report.debug:
-                print(line)
-        print("\nChanges since last scan:")
+                print(f"  {line}")
+        print("\nChanges since last scan")
         for line in report_changes(report, state_path(), config.ignores, NAMES):
-            print(line)
+            print(f"  {line}")
         if args.command in {"scan", "clients", "instances"}:
             return 0
         if args.command == "config" and args.setup:
             if not sys.stdin.isatty():
                 print("Setup requires an interactive terminal. Run mc_manager there.")
                 return 1
-            config = setup(report)
+            setup(report)
+            return 0
         if config.repository is None:
             if args.command is None:
                 if (

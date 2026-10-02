@@ -36,25 +36,54 @@ def load(path: Path | None = None) -> Config:
     path = path or config_path()
     if not path.exists():
         return Config()
-    with path.open("rb") as stream:
-        data = tomllib.load(stream)
-    repo = data.get("repository", {})
-    sync = data.get("sync", {})
-    selection = data.get("selection", {})
+    try:
+        with path.open("rb") as stream:
+            data = tomllib.load(stream)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"Invalid configuration {path}: {exc}") from exc
+
+    def table(name: str) -> dict:
+        value = data.get(name, {})
+        if not isinstance(value, dict):
+            raise ValueError(f"Invalid configuration {path}: [{name}] must be a table")
+        return value
+
+    def strings(value: object, name: str) -> list[str]:
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise ValueError(f"Invalid configuration {path}: {name} must be a list of strings")
+        return value
+
+    repo = table("repository")
+    sync = table("sync")
+    selection = table("selection")
+    roots = table("roots")
+    destinations = table("destinations")
+    for name in ("path", "remote"):
+        if not isinstance(repo.get(name, ""), str):
+            raise ValueError(f"Invalid configuration {path}: repository.{name} must be text")
+    for name in ("ask_before_sync", "git_commit", "git_push", "git_pull"):
+        if not isinstance(sync.get(name, True), bool):
+            raise ValueError(f"Invalid configuration {path}: sync.{name} must be true or false")
+    if not all(isinstance(value, str) for value in destinations.values()):
+        raise ValueError(f"Invalid configuration {path}: destinations must contain text paths")
     return Config(
         repository=Path(repo["path"]).expanduser() if repo.get("path") else None,
         remote=repo.get("remote"),
-        ask_before_sync=bool(sync.get("ask_before_sync", True)),
-        git_commit=bool(sync.get("git_commit", True)),
-        git_push=bool(sync.get("git_push", False)),
-        git_pull=bool(sync.get("git_pull", False)),
-        excluded_clients=list(selection.get("excluded_clients", [])),
-        excluded_instances=list(selection.get("excluded_instances", [])),
+        ask_before_sync=sync.get("ask_before_sync", True),
+        git_commit=sync.get("git_commit", True),
+        git_push=sync.get("git_push", False),
+        git_pull=sync.get("git_pull", False),
+        excluded_clients=strings(
+            selection.get("excluded_clients", []), "selection.excluded_clients"
+        ),
+        excluded_instances=strings(
+            selection.get("excluded_instances", []), "selection.excluded_instances"
+        ),
         extra_roots={
-            k: [Path(p).expanduser() for p in v] for k, v in data.get("roots", {}).items()
+            k: [Path(p).expanduser() for p in strings(v, f"roots.{k}")] for k, v in roots.items()
         },
-        destinations=dict(data.get("destinations", {})),
-        ignores=list(sync.get("ignores", [])),
+        destinations=dict(destinations),
+        ignores=strings(sync.get("ignores", []), "sync.ignores"),
     )
 
 

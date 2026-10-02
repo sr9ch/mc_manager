@@ -4,6 +4,7 @@ import fnmatch
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 from datetime import UTC, datetime
@@ -57,26 +58,35 @@ def _walk_content(
     source_dir: Path, prefix: Path, game: Path, patterns: list[str]
 ) -> dict[str, Path]:
     found: dict[str, Path] = {}
-    if not source_dir.is_dir() or source_dir.is_symlink():
+    if _ignored(prefix, patterns):
         return found
-    for current, dirs, files in os.walk(source_dir, followlinks=False):
+    if source_dir.is_symlink():
+        raise SafetyError(f"Symlinked source directory: {source_dir}")
+    if not source_dir.is_dir():
+        return found
+
+    def walk_error(error: OSError) -> None:
+        raise SafetyError(f"Cannot read source directory: {error}") from error
+
+    for current, dirs, files in os.walk(source_dir, followlinks=False, onerror=walk_error):
         current_path = Path(current)
-        dirs[:] = [
-            d
-            for d in dirs
-            if not (current_path / d).is_symlink()
-            and allowed_relative(Path(d))
-            and not _ignored(prefix / current_path.relative_to(source_dir) / d, patterns)
-        ]
+        safe_dirs = []
+        for directory in dirs:
+            relative = prefix / current_path.relative_to(source_dir) / directory
+            if not allowed_relative(Path(directory)) or _ignored(relative, patterns):
+                continue
+            if (current_path / directory).is_symlink():
+                raise SafetyError(f"Symlinked source directory: {current_path / directory}")
+            safe_dirs.append(directory)
+        dirs[:] = safe_dirs
         for filename in files:
             source = current_path / filename
             relative = prefix / current_path.relative_to(source_dir) / filename
-            if (
-                source.is_symlink()
-                or not source.is_file()
-                or not allowed_relative(relative)
-                or _ignored(relative, patterns)
-            ):
+            if not allowed_relative(relative) or _ignored(relative, patterns):
+                continue
+            if source.is_symlink():
+                raise SafetyError(f"Symlinked source file: {source}")
+            if not source.is_file():
                 continue
             if not source.resolve().is_relative_to(game.resolve()):
                 raise SafetyError(f"Source escapes game directory: {source}")
@@ -108,9 +118,13 @@ def source_files(instance: MinecraftInstance, patterns: list[str] | None = None)
     for name in CONTENT_DIRS:
         found.update(_walk_content(game / name, Path(name), game, patterns))
     saves = game / "saves"
-    if saves.is_dir() and not saves.is_symlink():
+    if saves.is_symlink():
+        raise SafetyError(f"Symlinked source directory: {saves}")
+    if saves.is_dir():
         for world in saves.iterdir():
-            if world.is_symlink() or not world.is_dir():
+            if world.is_symlink():
+                raise SafetyError(f"Symlinked source directory: {world}")
+            if not world.is_dir():
                 continue
             prefix = Path("datapacks") / world_slug(world.name)
             found.update(_walk_content(world / "datapacks", prefix, game, patterns))
@@ -126,11 +140,19 @@ def _manifest(path: Path) -> dict:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise SafetyError(f"Cannot read manifest {path}: {exc}") from exc
-    if data.get("schema") != 1 or not isinstance(data.get("files"), dict):
+    if (
+        not isinstance(data, dict)
+        or data.get("schema") != 1
+        or not isinstance(data.get("files"), dict)
+    ):
         raise SafetyError(f"Unknown manifest schema: {path}")
     for name, digest in data["files"].items():
-        safe_relative(name)
-        if not isinstance(digest, str) or len(digest) != 64:
+        if not isinstance(name, str):
+            raise SafetyError(f"Invalid path in {path}")
+        relative = safe_relative(name)
+        if relative.parts[0] not in CONTENT_DIRS or not allowed_relative(relative):
+            raise SafetyError(f"Unmanaged path in {path}: {name}")
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
             raise SafetyError(f"Invalid hash in {path}")
     return data
 
