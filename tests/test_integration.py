@@ -58,8 +58,8 @@ class EndToEndTests(unittest.TestCase):
                     env=environment,
                     text=True,
                     capture_output=True,
-                    check=True,
                 )
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
                 return result.stdout
 
             target = repository / "minecraft/prism/pack/mods/example.jar"
