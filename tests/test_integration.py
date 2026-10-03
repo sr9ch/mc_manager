@@ -58,6 +58,7 @@ class EndToEndTests(unittest.TestCase):
                     [sys.executable, "-m", "mc_manager", *arguments],
                     env=environment,
                     text=True,
+                    encoding="utf-8",
                     capture_output=True,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
